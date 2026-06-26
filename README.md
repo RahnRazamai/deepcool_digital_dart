@@ -1,128 +1,108 @@
-# deepcool_digital_dart
+# DeepCool Digital Dart
 
-Unofficial GPLv3 Dart port of `deepcool-digital-linux`, focused first on the
-DeepCool CH170 DIGITAL case display.
+A Linux-first GUI app for the DeepCool CH170 DIGITAL case display.
 
-Upstream reference:
-https://github.com/Nortank12/deepcool-digital-linux
+This repository contains:
 
-This is not official DeepCool software.
+- `flutter_desktop/`: Flutter Linux desktop app and packaging helpers.
+- `lib/` and `bin/`: shared Dart library code and a CLI entrypoint.
+- `packaging/`: AppImage, Debian, and Arch packaging support.
 
-## Current CH170 support
+This is an unofficial GPLv3 Dart port of `deepcool-digital-linux`.
+Upstream reference: https://github.com/Nortank12/deepcool-digital-linux
 
-Best-supported modes:
+## GUI-first Quick Start
 
-- `cpu_freq`: CPU temperature, CPU power, CPU usage, and CPU frequency.
-- `gpu`: GPU temperature, GPU power, GPU usage, and GPU frequency.
-- `auto`: cycles between `cpu_freq` and `gpu`.
+The recommended way to use this project is with the desktop app in
+`flutter_desktop/`.
 
-Recognized but limited modes:
+```bash
+cd flutter_desktop
+flutter pub get
+flutter run -d linux
+```
 
-- `cpu_fan`: uses the CH170 CPU/fan display layout, but fan RPM is not implemented yet.
-- `psu`: uses the CH170 PSU display layout, but PSU telemetry is not implemented yet.
+Build a release bundle for Linux:
 
-The default target is CH170 DIGITAL, vendor `0x3633`, product ID `19`
-(`0x0013`). CH270 (`22`) and CH690 (`27`) use the same CH-series-gen2 packet
-layout and can be selected with `--pid`, but this port is tuned and documented
-for CH170 first.
+```bash
+cd flutter_desktop
+flutter build linux --release
+```
+
+Run the built desktop app:
+
+```bash
+cd flutter_desktop/build/linux/x64/release/bundle
+./deepcool_desktop_app
+```
+
+## What the desktop app does
+
+- displays CPU and GPU telemetry
+- sends HID reports to DeepCool CH170 and compatible devices
+- lets you configure the daemon executable path
+- installs user/systemd autostart units
+- installs a udev rule for rootless HID device access
+
+For more details, see `flutter_desktop/README.md`.
 
 ## Requirements
 
-- Linux.
-- Dart SDK. In this workspace you can use:
-  `../flutter/bin/dart`
+- Linux
+- Flutter SDK for the desktop app
 - HIDAPI runtime library:
   - Arch: `sudo pacman -S hidapi`
   - Debian/Ubuntu: `sudo apt install libhidapi-hidraw0`
   - Fedora: `sudo dnf install hidapi`
 - Root access, or a udev rule that allows your user to write to the DeepCool
-  HID raw device.
+  HID raw device
 
-NVIDIA GPU mode uses `libnvidia-ml.so` through Dart FFI when available. AMD and
-Intel GPU mode use Linux sysfs.
+NVIDIA GPU mode uses `libnvidia-ml.so` through Dart FFI when available. AMD
+and Intel GPU modes use Linux sysfs.
 
-## Run
+## Udev rule
 
-From this package directory:
-
-```bash
-cd /home/rahngamingstudio/development/deepcool_digital_dart
-../flutter/bin/dart run bin/deepcool_digital_dart.dart --help
-```
-
-Check that the CH170 packet can be built without touching USB:
+Install the sample rule from `packaging/udev/99-deepcool-digital.rules`:
 
 ```bash
-../flutter/bin/dart run bin/deepcool_digital_dart.dart --dry-run
-```
-
-List DeepCool HID devices:
-
-```bash
-sudo ../flutter/bin/dart run bin/deepcool_digital_dart.dart --list
-```
-
-Run the CH170 in the recommended CPU mode:
-
-```bash
-sudo ../flutter/bin/dart run bin/deepcool_digital_dart.dart --mode cpu_freq
-```
-
-Run GPU mode:
-
-```bash
-sudo ../flutter/bin/dart run bin/deepcool_digital_dart.dart --mode gpu
-```
-
-If you have multiple GPUs, list them and choose one:
-
-```bash
-../flutter/bin/dart run bin/deepcool_digital_dart.dart --gpulist
-sudo ../flutter/bin/dart run bin/deepcool_digital_dart.dart --mode gpu --gpuid nvidia:1
-```
-
-Use auto mode:
-
-```bash
-sudo ../flutter/bin/dart run bin/deepcool_digital_dart.dart --mode auto
-```
-
-Send one HID report and exit:
-
-```bash
-sudo ../flutter/bin/dart run bin/deepcool_digital_dart.dart --once
-```
-
-## Rootless udev rule
-
-Create `/etc/udev/rules.d/99-deepcool-digital.rules`:
-
-```udev
-# DeepCool CH170 DIGITAL hidraw access
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="3633", ATTRS{idProduct}=="0013", MODE="0666"
-
-# Optional CPU power readout for Intel RAPL
-ACTION=="add", SUBSYSTEM=="powercap", KERNEL=="intel-rapl:0", RUN+="/bin/chmod 444 /sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj"
-```
-
-Then reload rules and replug the CH170 USB connection or reboot:
-
-```bash
+sudo cp packaging/udev/99-deepcool-digital.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-## Build native executable
+## CLI fallback
+
+If you prefer a headless tool instead of the GUI, the root `bin/` entrypoint
+uses the same shared package code.
 
 ```bash
 cd /home/rahngamingstudio/development/deepcool_digital_dart
-../flutter/bin/dart compile exe bin/deepcool_digital_dart.dart -o deepcool-digital-dart
+dart run bin/deepcool_digital_dart.dart --help
+```
+
+Recommended CLI examples:
+
+```bash
+dart run bin/deepcool_digital_dart.dart --dry-run
+sudo dart run bin/deepcool_digital_dart.dart --mode cpu_freq
+sudo dart run bin/deepcool_digital_dart.dart --mode gpu
+sudo dart run bin/deepcool_digital_dart.dart --mode auto
+```
+
+## Optional native executable (Linux)
+
+Dart uses `dart compile exe` to build a native executable on all platforms, including Linux. The output file does not need a `.exe` extension on Linux.
+
+Compile a standalone Linux executable from the root package:
+
+```bash
+dart compile exe bin/deepcool_digital_dart.dart -o deepcool-digital-dart
 sudo ./deepcool-digital-dart --mode cpu_freq
 ```
 
 ## Systemd service example
 
-After compiling and placing the binary somewhere stable, create
+After installing the binary somewhere stable, create
 `/etc/systemd/system/deepcool-digital-dart.service`:
 
 ```ini
@@ -148,9 +128,9 @@ sudo systemctl enable --now deepcool-digital-dart
 ## Development checks
 
 ```bash
-../flutter/bin/dart format .
-../flutter/bin/dart analyze
-../flutter/bin/dart run bin/deepcool_digital_dart.dart --dry-run
+dart format .
+dart analyze
+dart run bin/deepcool_digital_dart.dart --dry-run
 ```
 
 ## License
