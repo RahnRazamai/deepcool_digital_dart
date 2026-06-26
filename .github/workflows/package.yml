@@ -54,7 +54,7 @@ jobs:
 
       - name: Build AppImage
         run: |
-          bash packaging/appimage/make-appimage.sh
+          bash make-appimage.sh
         working-directory: packaging/appimage
 
       - name: Prepare Arch source tarball
