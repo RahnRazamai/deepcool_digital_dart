@@ -13,6 +13,8 @@ BUNDLE_SRC="$REPO_ROOT/../flutter_desktop/build/linux/x64/release/bundle"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/usr/bin"
 mkdir -p "$BUILD_DIR/usr/lib"
+mkdir -p "$BUILD_DIR/usr/share/deepcool_desktop_app"
+mkdir -p "$BUILD_DIR/usr/share/applications"
 
 # Copy the binary
 cp "$BUNDLE_SRC/deepcool_desktop_app" "$BUILD_DIR/usr/bin/deepcool-desktop"
@@ -22,11 +24,8 @@ if [ -d "$BUNDLE_SRC/lib" ]; then
 	cp -r "$BUNDLE_SRC/lib"/* "$BUILD_DIR/usr/lib/" || true
 fi
 if [ -d "$BUNDLE_SRC/data" ]; then
-	cp -r "$BUNDLE_SRC/data" "$BUILD_DIR/usr/share/deepcool_desktop_app/" || true
+	cp -r "$BUNDLE_SRC/data"/* "$BUILD_DIR/usr/share/deepcool_desktop_app/" || true
 fi
-
-# copy necessary libraries/data
-mkdir -p "$BUILD_DIR/usr/share/applications"
 cat > "$BUILD_DIR/usr/share/applications/com.rgs.deepcool_linux.desktop" <<EOF
 [Desktop Entry]
 Name=Deepcool Digital Linux
@@ -44,6 +43,7 @@ if [ -f "$REPO_ROOT/../flutter_desktop/assets/app-icon.png" ]; then
 fi
 
 echo "Run linuxdeploy (with plugins) to gather runtime deps..."
+export LD_LIBRARY_PATH="$BUILD_DIR/usr/lib:$LD_LIBRARY_PATH"
 linuxdeploy --appdir "$BUILD_DIR" --output appimage
 
 echo "AppImage created."
