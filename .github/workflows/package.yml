@@ -78,18 +78,39 @@ jobs:
       - name: Prepare Arch source tarball
         run: |
           set -euo pipefail
+
           PKGNAME=deepcool-desktop
           ARCHDIR=packaging/arch
-          # read pkgver from PKGBUILD so the tarball name matches
-          PKGVER=$(awk -F= '/^pkgver=/ {print $2; exit}' "$ARCHDIR/PKGBUILD")
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            PKGVER="${GITHUB_REF_NAME#v}"
+          else
+            PKGVER="0.1.0"
+          fi
+
+          # Update PKGBUILD version to match release tag
+          sed -i "s/^pkgver=.*/pkgver=$PKGVER/" "$ARCHDIR/PKGBUILD"
+          sed -i "s/^pkgrel=.*/pkgrel=1/" "$ARCHDIR/PKGBUILD"
+
           rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"
           mkdir -p "$ARCHDIR/$PKGNAME-$PKGVER"
+
           test -f flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app
+          test -f flutter_desktop/build/linux/x64/release/bundle/lib/libflutter_linux_gtk.so
+          test -d flutter_desktop/build/linux/x64/release/bundle/data
           test -x build/deepcool-digital-dart
-          cp -r flutter_desktop "$ARCHDIR/$PKGNAME-$PKGVER/"
+
+          # Copy FULL Flutter bundle
+          mkdir -p "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle"
+          cp -a flutter_desktop/build/linux/x64/release/bundle/. "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/"
+
+          # Copy CLI daemon
           install -Dm755 build/deepcool-digital-dart "$ARCHDIR/$PKGNAME-$PKGVER/build/deepcool-digital-dart"
+
+          # Copy packaging extras
           cp -r packaging/udev "$ARCHDIR/$PKGNAME-$PKGVER/udev"
           cp -r packaging/systemd "$ARCHDIR/$PKGNAME-$PKGVER/systemd"
+
           tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
           rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"
 

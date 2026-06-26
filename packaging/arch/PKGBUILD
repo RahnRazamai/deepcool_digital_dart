@@ -28,11 +28,36 @@ build() {
 
 package() {
   cd "$srcdir/$pkgname-$pkgver"
-  install -Dm755 flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app "$pkgdir/usr/bin/deepcool-desktop"
+
+  # Install full Flutter Linux bundle
+  install -dm755 "$pkgdir/usr/lib/deepcool-desktop"
+  cp -a flutter-bundle/. "$pkgdir/usr/lib/deepcool-desktop/"
+
+  # GUI launcher wrapper
+  install -dm755 "$pkgdir/usr/bin"
+
+  cat > "$pkgdir/usr/bin/deepcool-desktop" <<'EOF'
+#!/usr/bin/env bash
+set -e
+APPDIR="/usr/lib/deepcool-desktop"
+export LD_LIBRARY_PATH="$APPDIR/lib:${LD_LIBRARY_PATH:-}"
+exec "$APPDIR/deepcool_desktop_app" "$@"
+EOF
+
+  chmod 755 "$pkgdir/usr/bin/deepcool-desktop"
+
+  # CLI daemon
   install -Dm755 build/deepcool-digital-dart "$pkgdir/usr/bin/deepcool-digital-dart"
-  # install desktop file and icons
-  install -Dm644 flutter_desktop/appdir/usr/share/applications/deepcool-desktop.desktop "$pkgdir/usr/share/applications/com.rgs.deepcool_linux.desktop"
-  install -Dm644 flutter_desktop/appdir/usr/share/icons/hicolor/256x256/apps/deepcool-desktop.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
+
   # udev rule
-  install -Dm644 udev/99-deepcool-digital.rules "$pkgdir/etc/udev/rules.d/99-deepcool-digital.rules"
+  install -Dm644 udev/99-deepcool-digital.rules \
+    "$pkgdir/etc/udev/rules.d/99-deepcool-digital.rules"
+
+  # systemd files, only if you have them
+  if [ -d systemd ]; then
+    install -dm755 "$pkgdir/usr/lib/systemd/system"
+    cp -a systemd/*.service "$pkgdir/usr/lib/systemd/system/" 2>/dev/null || true
+  fi
+
+  # Desktop file and icon should stay wherever your current PKGBUILD already installs them
 }
