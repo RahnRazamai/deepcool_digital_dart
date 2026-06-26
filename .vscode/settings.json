@@ -1,0 +1,4 @@
+{
+  "dart.projectSearchDepth": 3,
+  "dart.flutterSdkPath": "${env:HOME}/flutter"
+}
