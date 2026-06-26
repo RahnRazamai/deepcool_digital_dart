@@ -43,6 +43,97 @@ Future<String> sendStatusPacket({
   }
 }
 
+class DisplayUpdater {
+  DisplayUpdater._();
+  static final DisplayUpdater instance = DisplayUpdater._();
+
+  DisplayMode? _mode;
+  CpuMonitor? _cpu;
+  GpuMonitor? _gpu;
+  HidApi? _api;
+  HidDevice? _device;
+  bool _canceled = false;
+  Future<void>? _loopFuture;
+
+  Future<void> _disposeDevice() async {
+    try {
+      _device?.close();
+    } catch (_) {}
+    try {
+      _api?.dispose();
+    } catch (_) {}
+    _device = null;
+    _api = null;
+  }
+
+  Future<void> _stopLoop() async {
+    _canceled = true;
+    final loop = _loopFuture;
+    if (loop != null) {
+      await loop;
+    }
+    _loopFuture = null;
+    _canceled = false;
+  }
+
+  Future<void> stop() async {
+    await _stopLoop();
+    await _disposeDevice();
+  }
+
+  Future<void> _runLoop() async {
+    final mode = _mode;
+    final cpu = _cpu;
+    final gpu = _gpu;
+    if (mode == null || cpu == null || gpu == null || _device == null) {
+      return;
+    }
+
+    while (!_canceled) {
+      try {
+        final display = Ch170Display(
+          cpu: cpu,
+          gpu: gpu,
+          mode: mode,
+          update: const Duration(milliseconds: 100),
+          fahrenheit: false,
+        );
+        final packet = await display.buildStatusPacket(mode);
+        _device!.write(packet);
+      } on Object {
+        break;
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+  }
+
+  Future<void> apply(DisplayMode mode, CpuMonitor cpu, GpuMonitor gpu) async {
+    await _stopLoop();
+
+    _mode = mode;
+    _cpu = cpu;
+    _gpu = gpu;
+
+    try {
+      _api = HidApi();
+      _device = _api!.open(
+        vendorId: deepCoolVendorId,
+        productId: ch170ProductId,
+      );
+    } on Object {
+      await _disposeDevice();
+      rethrow;
+    }
+
+    _loopFuture = _runLoop();
+  }
+
+  Future<void> dispose() async {
+    await _stopLoop();
+    await _disposeDevice();
+  }
+}
+
 Future<void> saveDisplayMode(DisplayMode mode) async {
   final config = await AppConfig.load();
   final updated = AppConfig(
@@ -59,8 +150,8 @@ Future<String> applyDisplayMode({
   required GpuMonitor gpu,
 }) async {
   await saveDisplayMode(mode);
-  final status = await sendStatusPacket(mode: mode, cpu: cpu, gpu: gpu);
-  return 'Saved display mode ${mode.symbol}. $status';
+  await DisplayUpdater.instance.apply(mode, cpu, gpu);
+  return 'Saved display mode ${mode.symbol}. Display updater running.';
 }
 
 GpuMonitor _defaultGpuMonitor() {
@@ -91,6 +182,22 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _applySavedDisplayMode();
+  }
+
+  Future<void> _applySavedDisplayMode() async {
+    final cfg = await AppConfig.load();
+    if (cfg.displayMode == DisplayMode.auto) return;
+    await DisplayUpdater.instance.apply(
+      cfg.displayMode,
+      CpuMonitor(),
+      _defaultGpuMonitor(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -517,11 +624,16 @@ class _MonitorPageState extends State<MonitorPage> {
                   const SizedBox(height: 6),
                   Text('CPU Usage: $_usagePercent%'),
                   const SizedBox(height: 12),
+                  const Text(
+                    'Save this page as the active CPU display view on the DeepCool screen.',
+                    style: TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 8),
                   ElevatedButton.icon(
                     onPressed: _isSending ? null : _sendCpuStatus,
-                    icon: const Icon(Icons.send),
+                    icon: const Icon(Icons.save),
                     label: Text(
-                      _isSending ? 'Saving...' : 'Show CPU on DeepCool display',
+                      _isSending ? 'Saving...' : 'Save CPU view to display',
                     ),
                   ),
                   if (_sendStatus.isNotEmpty) ...[
@@ -752,11 +864,16 @@ class _GpuPageState extends State<GpuPage> {
                         'Power: ${_gpuPowerWatts > 0 ? '$_gpuPowerWatts W' : 'N/A'}',
                       ),
                       const SizedBox(height: 12),
+                      const Text(
+                        'Save this page as the active GPU display view on the DeepCool screen.',
+                        style: TextStyle(fontSize: 12, color: Colors.white70),
+                      ),
+                      const SizedBox(height: 8),
                       ElevatedButton.icon(
                         onPressed: _isSending ? null : _sendGpuStatus,
-                        icon: const Icon(Icons.send),
+                        icon: const Icon(Icons.save),
                         label: Text(
-                          _isSending ? 'Saving...' : 'Show GPU on DeepCool display',
+                          _isSending ? 'Saving...' : 'Save GPU view to display',
                         ),
                       ),
                       if (_sendStatus.isNotEmpty) ...[
@@ -863,15 +980,20 @@ class _PsuPageState extends State<PsuPage> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
+                    'Save this page as the active PSU display view on the DeepCool screen.',
+                    style: TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
                     'Actual PSU metrics are not available on this system, but the device will remain in PSU display mode.',
                     style: TextStyle(fontSize: 12, color: Colors.white70),
                   ),
                   const SizedBox(height: 12),
                   ElevatedButton.icon(
                     onPressed: _isSending ? null : _sendPsuStatus,
-                    icon: const Icon(Icons.send),
+                    icon: const Icon(Icons.save),
                     label: Text(
-                      _isSending ? 'Saving...' : 'Show PSU on DeepCool display',
+                      _isSending ? 'Saving...' : 'Save PSU view to display',
                     ),
                   ),
                   if (_sendStatus.isNotEmpty) ...[
