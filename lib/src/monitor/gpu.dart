@@ -22,6 +22,7 @@ abstract interface class GpuMonitor {
   }
 
   String get label;
+  GpuVendor? get vendor;
   String? get warning;
   bool get isAvailable;
 
@@ -39,6 +40,9 @@ final class _NoGpu implements GpuMonitor {
 
   @override
   String get label => 'none';
+
+  @override
+  GpuVendor? get vendor => null;
 
   @override
   bool get isAvailable => false;
@@ -72,6 +76,9 @@ final class _AmdGpu implements GpuMonitor {
 
   @override
   String get label => _gpu.name;
+
+  @override
+  GpuVendor get vendor => _gpu.vendor;
 
   @override
   String? get warning => null;
@@ -119,6 +126,9 @@ final class _IntelGpu implements GpuMonitor {
 
   @override
   String get label => _gpu.name;
+
+  @override
+  GpuVendor get vendor => _gpu.vendor;
 
   @override
   String? get warning => _drmDir == null
@@ -257,6 +267,9 @@ final class _NvidiaGpu implements GpuMonitor {
 
   @override
   String get label => _gpu.name;
+
+  @override
+  GpuVendor get vendor => _gpu.vendor;
 
   @override
   String? get warning => null;

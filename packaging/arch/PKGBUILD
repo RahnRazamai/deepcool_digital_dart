@@ -42,12 +42,6 @@ EOF
       "$pkgdir/usr/lib/udev/rules.d/99-deepcool-digital.rules"
   fi
 
-  # systemd service
-  if compgen -G "systemd/*.service" > /dev/null; then
-    install -dm755 "$pkgdir/usr/lib/systemd/system"
-    install -Dm644 systemd/*.service -t "$pkgdir/usr/lib/systemd/system/"
-  fi
-
   # desktop file
   if compgen -G "applications/*.desktop" > /dev/null; then
     install -dm755 "$pkgdir/usr/share/applications"

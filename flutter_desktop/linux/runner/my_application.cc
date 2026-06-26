@@ -24,6 +24,7 @@ static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  gtk_window_set_icon_name(window, APPLICATION_ID);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -104,6 +105,8 @@ static void my_application_startup(GApplication* application) {
   // MyApplication* self = MY_APPLICATION(object);
 
   // Perform any actions required at application startup.
+  g_set_application_name("Deepcool Digital Linux");
+  gtk_window_set_default_icon_name(APPLICATION_ID);
 
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
 }

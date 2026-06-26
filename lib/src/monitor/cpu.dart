@@ -8,6 +8,18 @@ final class CpuSample {
   final int idle;
 }
 
+enum CpuVendor { amd, intel, unknown }
+
+extension CpuVendorText on CpuVendor {
+  String get label {
+    return switch (this) {
+      CpuVendor.amd => 'AMD',
+      CpuVendor.intel => 'Intel',
+      CpuVendor.unknown => 'Unknown',
+    };
+  }
+}
+
 final class CpuMonitor {
   CpuMonitor()
     : _temperaturePath = _findTemperatureSensor(),
@@ -20,6 +32,21 @@ final class CpuMonitor {
 
   bool get hasTemperature => _temperaturePath != null;
   bool get hasRapl => _raplEnergyPath != null && _raplMaxMicrojoules > 0;
+  bool get hasPowerSensor => _raplEnergyPath != null;
+
+  String? get powerWarning {
+    final path = _raplEnergyPath;
+    if (path == null) {
+      return 'No CPU power sensor was found.';
+    }
+    if (_readInt(path) == null) {
+      return 'CPU power sensor exists, but Linux is blocking read access. Turn on Keep display running to install sensor access.';
+    }
+    if (_raplMaxMicrojoules <= 0) {
+      return 'CPU power sensor exists, but its range could not be read.';
+    }
+    return null;
+  }
 
   int temperature({required bool fahrenheit}) {
     final path = _temperaturePath;
@@ -141,6 +168,43 @@ final class CpuMonitor {
       }
     }
     return null;
+  }
+
+  static CpuVendor cpuVendor() {
+    final cpuinfo = _readTrimmed('/proc/cpuinfo');
+    if (cpuinfo == null) {
+      return CpuVendor.unknown;
+    }
+
+    for (final line in cpuinfo.split('\n')) {
+      if (!line.startsWith('vendor_id')) {
+        continue;
+      }
+      final vendorId = line.split(':').skip(1).join(':').trim().toLowerCase();
+      if (vendorId == 'authenticamd') {
+        return CpuVendor.amd;
+      }
+      if (vendorId == 'genuineintel') {
+        return CpuVendor.intel;
+      }
+    }
+
+    final normalized = cpuinfo.toLowerCase();
+    if (normalized.contains('advanced micro devices') ||
+        normalized.contains('amd') ||
+        normalized.contains('ryzen') ||
+        normalized.contains('threadripper') ||
+        normalized.contains('epyc')) {
+      return CpuVendor.amd;
+    }
+    if (normalized.contains('intel') ||
+        normalized.contains('xeon') ||
+        normalized.contains('core(tm)') ||
+        normalized.contains('pentium') ||
+        normalized.contains('celeron')) {
+      return CpuVendor.intel;
+    }
+    return CpuVendor.unknown;
   }
 }
 

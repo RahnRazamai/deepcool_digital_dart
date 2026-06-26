@@ -35,10 +35,33 @@ void main() {
     expect(unit, contains('WantedBy=default.target'));
   });
 
+  test('CH Gen 2 PSU packet uses the supported PSU mode selector', () async {
+    final target = DeepCoolDeviceTarget(
+      supportedDeepCoolDevices.firstWhere(
+        (device) => device.productId == ch170ProductId,
+      ),
+    );
+    final display = DeepCoolDisplay(
+      target: target,
+      cpu: CpuMonitor(),
+      gpu: GpuMonitor.fromPci(null),
+      mode: DisplayMode.psu,
+      update: Duration.zero,
+      fahrenheit: false,
+    );
+
+    final packet = await display.buildStatusPacket(DisplayMode.psu);
+
+    expect(packet[6], DisplayMode.psu.chGen2Value);
+    expect(packet[6], 5);
+  });
+
   test('udev rule grants access to supported DeepCool HID devices', () {
     expect(deepCoolUdevRules, contains('ATTRS{idVendor}=="3633"'));
     expect(deepCoolUdevRules, contains('ATTRS{idVendor}=="34d3"'));
     expect(deepCoolUdevRules, contains('ATTRS{idProduct}=="1100"'));
+    expect(deepCoolUdevRules, contains('SUBSYSTEM=="powercap"'));
+    expect(deepCoolUdevRules, contains('energy_uj'));
     expect(deepCoolUdevRules, isNot(contains('ATTRS{idVendor}=="1a86"')));
   });
 }

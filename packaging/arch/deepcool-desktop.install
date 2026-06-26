@@ -1,8 +1,15 @@
 post_install() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now deepcool-digital-dart.service 2>/dev/null || true
+    rm -f /etc/systemd/system/deepcool-digital-dart.service
+    systemctl daemon-reload || true
+  fi
   if command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload-rules || udevadm control --reload || true
     udevadm trigger || true
   fi
+  find /sys/class/powercap -name energy_uj -exec chmod a+r {} + 2>/dev/null || true
+  find /sys/class/powercap -name max_energy_range_uj -exec chmod a+r {} + 2>/dev/null || true
   if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
   fi
@@ -16,6 +23,11 @@ post_upgrade() {
 }
 
 pre_remove() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now deepcool-digital-dart.service 2>/dev/null || true
+    rm -f /etc/systemd/system/deepcool-digital-dart.service
+    systemctl daemon-reload || true
+  fi
   if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
   fi

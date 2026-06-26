@@ -83,6 +83,11 @@ The **Keep display running** toggle starts a small background daemon that keeps
 sending updates to the display. That is why the screen can keep working without
 the app window being open.
 
+PSU readings are shown when Linux exposes a real PSU sensor through hwmon. If
+no PSU sensor is available, the PSU page and supported PSU display modes fall
+back to an estimated **CPU + GPU power** value when those sensors are readable.
+That estimate excludes motherboard, drives, fans, and PSU conversion losses.
+
 ## Troubleshooting
 
 ### The display stops when I close the app
@@ -105,6 +110,19 @@ Manual fallback:
 sudo cp packaging/udev/99-deepcool-digital.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
+```
+
+### The display flickers between modes
+
+This usually means an old system service is still running and sending a second
+mode to the display. You do not need to clean the project. Turn **Keep display
+running** off and on once, or run:
+
+```bash
+systemctl --user stop deepcool-digital-dart.service
+sudo systemctl disable --now deepcool-digital-dart.service
+sudo rm -f /etc/systemd/system/deepcool-digital-dart.service
+sudo systemctl daemon-reload
 ```
 
 ### The app says HIDAPI is missing
