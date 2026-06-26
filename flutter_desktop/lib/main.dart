@@ -94,12 +94,14 @@ class AppConfig {
   AppConfig({required this.daemonPath, this.autostartUser = true});
 
   Map<String, dynamic> toJson() => {
-        'daemonPath': daemonPath,
-        'autostartUser': autostartUser,
-      };
+    'daemonPath': daemonPath,
+    'autostartUser': autostartUser,
+  };
 
   static Future<AppConfig> load() async {
-    final cfgFile = File('${Platform.environment['HOME']}/.config/deepcool-desktop/config.json');
+    final cfgFile = File(
+      '${Platform.environment['HOME']}/.config/deepcool-desktop/config.json',
+    );
     try {
       if (await cfgFile.exists()) {
         final text = await cfgFile.readAsString();
@@ -110,11 +112,16 @@ class AppConfig {
         );
       }
     } catch (_) {}
-    return AppConfig(daemonPath: '/usr/bin/deepcool-digital-dart', autostartUser: true);
+    return AppConfig(
+      daemonPath: '/usr/bin/deepcool-digital-dart',
+      autostartUser: true,
+    );
   }
 
   Future<void> save() async {
-    final dir = Directory('${Platform.environment['HOME']}/.config/deepcool-desktop');
+    final dir = Directory(
+      '${Platform.environment['HOME']}/.config/deepcool-desktop',
+    );
     await dir.create(recursive: true);
     final cfgFile = File('${dir.path}/config.json');
     await cfgFile.writeAsString(jsonEncode(toJson()));
@@ -148,7 +155,10 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _save() async {
-    final cfg = AppConfig(daemonPath: _daemonController.text.trim(), autostartUser: _autostartUser);
+    final cfg = AppConfig(
+      daemonPath: _daemonController.text.trim(),
+      autostartUser: _autostartUser,
+    );
     try {
       await cfg.save();
       setState(() => _status = 'Config saved');
@@ -159,7 +169,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _installSystemService(bool enable) async {
     final servicePath = '/etc/systemd/system/deepcool-digital-dart.service';
-    final content = '''[Unit]
+    final content =
+        '''[Unit]
 Description=DeepCool Digital Dart Daemon (system)
 After=network.target
 
@@ -172,21 +183,25 @@ Restart=on-failure
 WantedBy=multi-user.target
 ''';
     try {
-      final tmp = await File('${Directory.systemTemp.path}/deepcool-digital-dart.service').create();
+      final tmp = await File(
+        '${Directory.systemTemp.path}/deepcool-digital-dart.service',
+      ).create();
       await tmp.writeAsString(content);
       // try pkexec first, then sudo
-      ProcessResult? res;
-      if (await _which('pkexec')) {
-        res = await Process.run('pkexec', ['cp', tmp.path, servicePath]);
-      } else {
-        res = await Process.run('sudo', ['cp', tmp.path, servicePath]);
-      }
+      final res = await (await _which('pkexec')
+          ? Process.run('pkexec', ['cp', tmp.path, servicePath])
+          : Process.run('sudo', ['cp', tmp.path, servicePath]));
       if (res.exitCode != 0) {
         setState(() => _status = 'Failed to copy service: ${res.stderr}');
         return;
       }
-      final reload = await Process.run('sudo', ['systemctl', 'daemon-reload']);
-      final enableRes = await Process.run('sudo', ['systemctl', 'enable', '--now', 'deepcool-digital-dart.service']);
+      await Process.run('sudo', ['systemctl', 'daemon-reload']);
+      final enableRes = await Process.run('sudo', [
+        'systemctl',
+        'enable',
+        '--now',
+        'deepcool-digital-dart.service',
+      ]);
       if (enableRes.exitCode == 0) {
         setState(() => _status = 'System service enabled');
       } else {
@@ -219,20 +234,31 @@ WantedBy=multi-user.target
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Daemon Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'Daemon Settings',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _daemonController,
-                    decoration: const InputDecoration(label: Text('Daemon executable path')),
+                    decoration: const InputDecoration(
+                      label: Text('Daemon executable path'),
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
                       const Text('User autostart'),
                       const SizedBox(width: 12),
-                      Switch(value: _autostartUser, onChanged: (v) => setState(() => _autostartUser = v)),
+                      Switch(
+                        value: _autostartUser,
+                        onChanged: (v) => setState(() => _autostartUser = v),
+                      ),
                       const Spacer(),
-                      ElevatedButton(onPressed: _save, child: const Text('Save')),
+                      ElevatedButton(
+                        onPressed: _save,
+                        child: const Text('Save'),
+                      ),
                     ],
                   ),
                 ],
@@ -246,9 +272,17 @@ WantedBy=multi-user.target
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('System integration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'System integration',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 8),
-                  ElevatedButton(onPressed: () => _installSystemService(true), child: const Text('Install systemd service (requires sudo)')),
+                  ElevatedButton(
+                    onPressed: () => _installSystemService(true),
+                    child: const Text(
+                      'Install systemd service (requires sudo)',
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -281,12 +315,20 @@ class _MonitorPageState extends State<MonitorPage> {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
   void _tick() {
     final current = _monitor.readUsageSample();
     if (current != null && _prevSample != null) {
       final totalDelta = current.total - _prevSample!.total;
       final idleDelta = current.idle - _prevSample!.idle;
-      final usage = totalDelta <= 0 ? 0 : ((totalDelta - idleDelta) * 100) / totalDelta;
+      final usage = totalDelta <= 0
+          ? 0
+          : ((totalDelta - idleDelta) * 100) / totalDelta;
       final x = DateTime.now().millisecondsSinceEpoch / 1000.0;
       setState(() {
         _points.add(FlSpot(x, usage.toDouble()));
@@ -296,55 +338,27 @@ class _MonitorPageState extends State<MonitorPage> {
     if (current != null) _prevSample = current;
   }
 
-                  Row(
-                    children: [
-                      const Text('User autostart'),
-                      const SizedBox(width: 12),
-                      Switch(value: _autostartUser, onChanged: (v) => setState(() => _autostartUser = v)),
-                      const Spacer(),
-                      ElevatedButton(onPressed: _save, child: const Text('Save')),
-                    ],
-                  ),
+  @override
+  Widget build(BuildContext context) {
     final freq = _monitor.frequencyMhz();
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('System integration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'CPU Status',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 8),
-                  Row(children: [
-                    ElevatedButton(onPressed: () => _installSystemService(true), child: const Text('Install systemd service (requires sudo)')),
-                    const SizedBox(width: 12),
-                    ElevatedButton(onPressed: () => _toggleUserAutostart(), child: const Text('Toggle user autostart')),
-                  ]),
-                  const SizedBox(height: 8),
-                  ElevatedButton(onPressed: () => _installUdevRule(), child: const Text('Install udev rule (requires sudo)')),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Packaging', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    ElevatedButton(onPressed: () => _runAppImage(), child: const Text('Build AppImage')),
-                    const SizedBox(width: 12),
-                    ElevatedButton(onPressed: () => _runMakePackages('deb'), child: const Text('Build .deb')),
-                    const SizedBox(width: 12),
-                    ElevatedButton(onPressed: () => _runMakePackages('arch'), child: const Text('Build Arch PKG')),
-                  ])
+                  Text('Frequency: ${freq > 0 ? '$freq MHz' : 'N/A'}'),
                 ],
               ),
             ),
@@ -355,93 +369,15 @@ class _MonitorPageState extends State<MonitorPage> {
               child: Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: Column(
-
-  Future<void> _toggleUserAutostart() async {
-    final cfg = await AppConfig.load();
-    final serviceDir = '${Platform.environment['HOME']}/.config/systemd/user';
-    final serviceFile = '$serviceDir/deepcool-digital-dart.service';
-    try {
-      await Directory(serviceDir).create(recursive: true);
-      if (await File(serviceFile).exists()) {
-        await Process.run('systemctl', ['--user', 'disable', '--now', 'deepcool-digital-dart.service']);
-        await File(serviceFile).delete();
-        await Process.run('systemctl', ['--user', 'daemon-reload']);
-        setState(() => _status = 'User autostart disabled');
-      } else {
-        final content = '''[Unit]
-Description=DeepCool Digital Dart CH170 (user)
-After=default.target
-
-[Service]
-ExecStart=${cfg.daemonPath} --mode auto
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-''';
-        await File(serviceFile).writeAsString(content);
-        await Process.run('systemctl', ['--user', 'daemon-reload']);
-        await Process.run('systemctl', ['--user', 'enable', '--now', 'deepcool-digital-dart.service']);
-        setState(() => _status = 'User autostart enabled');
-      }
-    } on Object catch (e) {
-      setState(() => _status = 'Autostart toggle error: $e');
-    }
-  }
-
-  Future<void> _installUdevRule() async {
-    final repo = '/home/rahngamingstudio/development/deepcool_digital_dart';
-    final src = '$repo/packaging/udev/99-deepcool-digital.rules';
-    final dst = '/etc/udev/rules.d/99-deepcool-digital.rules';
-    try {
-      if (!await File(src).exists()) {
-        setState(() => _status = 'Udev rule not found in repo');
-        return;
-      }
-      ProcessResult? res;
-      if (await _which('pkexec')) {
-        res = await Process.run('pkexec', ['cp', src, dst]);
-      } else {
-        res = await Process.run('sudo', ['cp', src, dst]);
-      }
-      if (res.exitCode != 0) {
-        setState(() => _status = 'Failed to install udev rule: ${res.stderr}');
-        return;
-      }
-      await Process.run('sudo', ['udevadm', 'control', '--reload']);
-      await Process.run('sudo', ['udevadm', 'trigger']);
-      setState(() => _status = 'Udev rule installed');
-    } on Object catch (e) {
-      setState(() => _status = 'Udev install error: $e');
-    }
-  }
-
-  Future<void> _runAppImage() async {
-    final repo = '/home/rahngamingstudio/development/deepcool_digital_dart';
-    final script = '$repo/packaging/appimage/make-appimage.sh';
-    try {
-      if (!await File(script).exists()) { setState(() => _status = 'AppImage script not found'); return; }
-      final res = await Process.run('bash', [script], workingDirectory: '$repo/packaging/appimage');
-      setState(() => _status = res.exitCode == 0 ? 'AppImage build finished' : 'AppImage build failed: ${res.stderr}');
-    } on Object catch (e) {
-      setState(() => _status = 'AppImage error: $e');
-    }
-  }
-
-  Future<void> _runMakePackages(String type) async {
-    final repo = '/home/rahngamingstudio/development/deepcool_digital_dart';
-    final script = '$repo/packaging/make-packages.sh';
-    try {
-      if (!await File(script).exists()) { setState(() => _status = 'Packaging script not found'); return; }
-      final res = await Process.run('bash', [script, type], workingDirectory: '$repo/packaging');
-      setState(() => _status = res.exitCode == 0 ? 'Packaging ($type) finished' : 'Packaging ($type) failed: ${res.stderr}');
-    } on Object catch (e) {
-      setState(() => _status = 'Packaging error: $e');
-    }
-  }
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('CPU Usage (last 60s)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'CPU Usage (last 60s)',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Expanded(
                       child: _points.isEmpty
@@ -508,7 +444,9 @@ class _GpuPageState extends State<GpuPage> {
     final monitor = GpuMonitor.fromPci(selected);
     setState(() {
       _monitor = monitor;
-      _label = monitor.isAvailable ? monitor.label : (monitor.warning ?? 'No GPU');
+      _label = monitor.isAvailable
+          ? monitor.label
+          : (monitor.warning ?? 'No GPU');
     });
   }
 
@@ -548,14 +486,24 @@ class _GpuPageState extends State<GpuPage> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(_label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(
+                        _label,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       Text('Temp: ${temp != null ? '$temp °C' : 'N/A'}'),
                       Text('Freq: ${freq > 0 ? '$freq MHz' : 'N/A'}'),
                       Text('Power: ${power > 0 ? '$power W' : 'N/A'}'),
                     ],
                   ),
-                  const Icon(Icons.graphic_eq, size: 48, color: Colors.orangeAccent),
+                  const Icon(
+                    Icons.graphic_eq,
+                    size: 48,
+                    color: Colors.orangeAccent,
+                  ),
                 ],
               ),
             ),
@@ -624,11 +572,20 @@ class _ControlsPageState extends State<ControlsPage> {
   Future<void> _sendSample() async {
     try {
       final api = HidApi();
-      final device = api.open(vendorId: deepCoolVendorId, productId: ch170ProductId);
+      final device = api.open(
+        vendorId: deepCoolVendorId,
+        productId: ch170ProductId,
+      );
       final cpu = CpuMonitor();
       final gpus = listPciGpus();
       final gpu = GpuMonitor.fromPci(selectGpu(gpus, null));
-      final display = Ch170Display(cpu: cpu, gpu: gpu, mode: DisplayMode.cpuFrequency, update: const Duration(milliseconds: 100), fahrenheit: false);
+      final display = Ch170Display(
+        cpu: cpu,
+        gpu: gpu,
+        mode: DisplayMode.cpuFrequency,
+        update: const Duration(milliseconds: 100),
+        fahrenheit: false,
+      );
       final packet = await display.buildStatusPacket(DisplayMode.cpuFrequency);
       device.write(packet);
       device.close();
@@ -636,80 +593,6 @@ class _ControlsPageState extends State<ControlsPage> {
       setState(() => _status = 'Packet sent to device');
     } on Object catch (e) {
       setState(() => _status = 'Failed to send: $e');
-    }
-  }
-
-  // Spawn/monitor the compiled daemon binary
-  Process? _daemonProcess;
-  bool _daemonRunning = false;
-  bool _autostartEnabled = false;
-
-  Future<void> _startDaemon() async {
-    try {
-      final cfg = await AppConfig.load();
-      final exe = cfg.daemonPath;
-      if (!await File(exe).exists()) {
-        setState(() => _status = 'Executable not found at $exe');
-        return;
-      }
-      _daemonProcess = await Process.start(exe, ['--mode', 'auto']);
-      _daemonRunning = true;
-      _daemonProcess!.stdout.transform(const Utf8Decoder()).listen((s) {
-        setState(() => _status = s.trim());
-      });
-      _daemonProcess!.stderr.transform(const Utf8Decoder()).listen((s) {
-        setState(() => _status = s.trim());
-      });
-      setState(() {});
-    } on Object catch (e) {
-      setState(() => _status = 'Failed to start: $e');
-    }
-  }
-
-  Future<void> _stopDaemon() async {
-    try {
-      _daemonProcess?.kill(ProcessSignal.sigterm);
-      _daemonProcess = null;
-      _daemonRunning = false;
-      setState(() => _status = 'Daemon stopped');
-    } on Object catch (e) {
-      setState(() => _status = 'Failed to stop: $e');
-    }
-  }
-
-  Future<void> _toggleAutostart(bool enable) async {
-    // Create a user-level systemd service under ~/.config/systemd/user/
-    final serviceDir = '${Platform.environment['HOME']}/.config/systemd/user';
-    final serviceFile = '$serviceDir/deepcool-digital-dart.service';
-    final cfg = await AppConfig.load();
-    final exePath = cfg.daemonPath;
-    try {
-      await Directory(serviceDir).create(recursive: true);
-      if (enable) {
-        final content = '''[Unit]
-Description=DeepCool Digital Dart CH170 (user)
-After=default.target
-
-[Service]
-ExecStart=$exePath --mode auto
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-''';
-        await File(serviceFile).writeAsString(content);
-        // enable via systemctl --user
-        await Process.run('systemctl', ['--user', 'daemon-reload']);
-        await Process.run('systemctl', ['--user', 'enable', '--now', 'deepcool-digital-dart.service']);
-        setState(() { _autostartEnabled = true; _status = 'Autostart enabled (user)'; });
-      } else {
-        await Process.run('systemctl', ['--user', 'disable', '--now', 'deepcool-digital-dart.service']);
-        if (await File(serviceFile).exists()) await File(serviceFile).delete();
-        await Process.run('systemctl', ['--user', 'daemon-reload']);
-        setState(() { _autostartEnabled = false; _status = 'Autostart disabled'; });
-      }
-    } on Object catch (e) {
-      setState(() => _status = 'Autostart error: $e');
     }
   }
 
@@ -728,9 +611,17 @@ WantedBy=default.target
         children: [
           Row(
             children: [
-              ElevatedButton.icon(onPressed: _refresh, icon: const Icon(Icons.refresh), label: const Text('Refresh')),
+              ElevatedButton.icon(
+                onPressed: _refresh,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Refresh'),
+              ),
               const SizedBox(width: 12),
-              ElevatedButton.icon(onPressed: _sendSample, icon: const Icon(Icons.send), label: const Text('Send sample to CH170')),
+              ElevatedButton.icon(
+                onPressed: _sendSample,
+                icon: const Icon(Icons.send),
+                label: const Text('Send sample to CH170'),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -747,8 +638,12 @@ WantedBy=default.target
                         itemBuilder: (context, index) {
                           final d = _devices[index];
                           return ListTile(
-                            title: Text(d.product.isNotEmpty ? d.product : d.path),
-                            subtitle: Text('VID=0x${d.vendorId.toRadixString(16)} PID=0x${d.productId.toRadixString(16)}'),
+                            title: Text(
+                              d.product.isNotEmpty ? d.product : d.path,
+                            ),
+                            subtitle: Text(
+                              'VID=0x${d.vendorId.toRadixString(16)} PID=0x${d.productId.toRadixString(16)}',
+                            ),
                           );
                         },
                       ),
