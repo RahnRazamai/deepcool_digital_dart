@@ -43,11 +43,12 @@ jobs:
           curl -LO https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage || true
           chmod +x linuxdeploy-*.AppImage || true
           chmod +x appimagetool-*.AppImage || true
-          printf '#!/bin/bash\nexec "$PWD/linuxdeploy-x86_64.AppImage" "$@"\n' > linuxdeploy
+          APPIMAGE_DIR="$(cd "$(pwd)" && pwd)"
+          printf '#!/bin/bash\nexec "%s/linuxdeploy-x86_64.AppImage" "$@"\n' "$APPIMAGE_DIR" > linuxdeploy
           chmod +x linuxdeploy
           sudo mv linuxdeploy /usr/local/bin/linuxdeploy
           if [ -f appimagetool-x86_64.AppImage ]; then
-            printf '#!/bin/bash\nexec "$PWD/appimagetool-x86_64.AppImage" "$@"\n' > appimagetool
+            printf '#!/bin/bash\nexec "%s/appimagetool-x86_64.AppImage" "$@"\n' "$APPIMAGE_DIR" > appimagetool
             chmod +x appimagetool
             sudo mv appimagetool /usr/local/bin/appimagetool
           fi
