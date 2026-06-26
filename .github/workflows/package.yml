@@ -5,6 +5,9 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: write
+    
 jobs:
   build-packages:
     runs-on: ubuntu-latest
@@ -121,51 +124,32 @@ jobs:
             packaging/arch/*.tar.gz
             packaging/arch/*.pkg.*
 
-      - name: Create GitHub Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-
-      - name: Upload release assets
+      - name: Create GitHub Release and upload assets
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPLOAD_URL: ${{ steps.create_release.outputs.upload_url }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          echo "Uploading .deb files..."
-          for f in packaging/out/**/*.deb; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            echo "Uploading $name"
-            curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" "$UPLOAD_URL?name=$name"
-          done
-          echo "Uploading AppImage files..."
-          for f in packaging/appimage/*.AppImage; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            echo "Uploading $name"
-            curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" "$UPLOAD_URL?name=$name"
-          done
-          echo "Uploading source tarballs..."
-          for f in packaging/arch/*.tar.gz; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            echo "Uploading $name"
-            curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/gzip" --data-binary @"$f" "$UPLOAD_URL?name=$name"
-          done
-          echo "Uploading Arch packages..."
-          for f in packaging/arch/*.pkg.*; do
-            [ -f "$f" ] || continue
-            name=$(basename "$f")
-            echo "Uploading $name"
-            curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" "$UPLOAD_URL?name=$name"
-          done
+          shopt -s globstar nullglob
+
+          files=(
+            packaging/out/**/*.deb
+            packaging/appimage/*.AppImage
+            packaging/arch/*.tar.gz
+            packaging/arch/*.pkg.*
+          )
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "ERROR: No release files found"
+            exit 1
+          fi
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already exists. Uploading assets with --clobber..."
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            echo "Creating release $GITHUB_REF_NAME..."
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --title "Release $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
