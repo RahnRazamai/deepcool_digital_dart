@@ -1,0 +1,101 @@
+name: Build packages
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['v*']
+
+jobs:
+  build-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+
+      - name: Install apt dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libhidapi-dev libgtk-3-dev curl wget xz-utils
+
+      - name: Get Flutter deps
+        run: flutter pub get
+        working-directory: flutter_desktop
+
+      - name: Build Flutter Linux release
+        run: flutter build linux --release
+        working-directory: flutter_desktop
+
+      - name: Build .deb package
+        run: bash packaging/debian/make-deb.sh 0.1.0
+
+      - name: Download linuxdeploy and appimagetool
+        run: |
+          curl -LO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -LO https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage || true
+          chmod +x linuxdeploy-*.AppImage || true
+          chmod +x appimagetool-*.AppImage || true
+          printf '%s
+'#!/bin/bash'
+'exec "$PWD/linuxdeploy-x86_64.AppImage" "$@"' > linuxdeploy
+          chmod +x linuxdeploy
+          sudo mv linuxdeploy /usr/local/bin/linuxdeploy
+          if [ -f appimagetool-x86_64.AppImage ]; then
+            printf '%s
+'#!/bin/bash'
+'exec "$PWD/appimagetool-x86_64.AppImage" "$@"' > appimagetool
+            chmod +x appimagetool
+            sudo mv appimagetool /usr/local/bin/appimagetool
+          fi
+
+      - name: Build AppImage
+        run: |
+          bash packaging/appimage/make-appimage.sh
+        working-directory: packaging/appimage
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            packaging/out/**/*.deb
+            packaging/appimage/*.AppImage
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Upload release assets (deb + AppImage)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPLOAD_URL: ${{ steps.create_release.outputs.upload_url }}
+        run: |
+          set -euo pipefail
+          echo "Uploading .deb files..."
+          for f in packaging/out/**/*.deb; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            echo "Uploading $name"
+            curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" "$UPLOAD_URL?name=$name"
+          done
+          echo "Uploading AppImage files..."
+          for f in packaging/appimage/*.AppImage; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            echo "Uploading $name"
+            curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" "$UPLOAD_URL?name=$name"
+          done

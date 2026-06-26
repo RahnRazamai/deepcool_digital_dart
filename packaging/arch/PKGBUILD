@@ -1,0 +1,22 @@
+pkgname=deepcool-desktop
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="DeepCool Desktop GUI for DeepCool Digital devices"
+arch=('x86_64')
+url="https://example"
+license=('GPL')
+depends=(libc libhidapi)
+source=("$pkgname-$pkgver.tar.gz")
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver/flutter_desktop"
+  flutter build linux --release
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver/flutter_desktop/build/linux/x64/release/bundle"
+  install -Dm755 deepcool_desktop_app "$pkgdir/usr/bin/deepcool-desktop"
+  install -Dm644 data/* "$pkgdir/usr/share/deepcool-desktop/"
+  # udev rule
+  install -Dm644 ../../udev/99-deepcool-digital.rules "$pkgdir/etc/udev/rules.d/99-deepcool-digital.rules"
+}

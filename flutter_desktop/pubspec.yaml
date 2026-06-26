@@ -1,0 +1,16 @@
+name: deepcool_desktop_app
+description: Flutter desktop app for DeepCool Digital — CPU/GPU monitor UI
+publish_to: none
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  deepcool_digital_dart:
+    path: ..
+  fl_chart: ^1.2.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,9 @@
+deepcool_digital_dart is an unofficial Dart port based on:
+
+  deepcool-digital-linux
+  https://github.com/Nortank12/deepcool-digital-linux
+
+The upstream project is licensed under GPL-3.0. This Dart port is also
+distributed under GPL-3.0 and keeps the CH-series-gen2 protocol attribution.
+
+This project is not affiliated with or endorsed by DeepCool.
