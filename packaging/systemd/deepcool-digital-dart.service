@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/deepcool-digital-dart
+ExecStart=/usr/bin/deepcool-digital-dart --mode saved
 Restart=on-failure
 
 [Install]

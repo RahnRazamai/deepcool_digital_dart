@@ -6,6 +6,7 @@ VERSION="${1:-${VERSION:-0.1.0}}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/../icon-utils.sh"
 
 BUILD_DIR="$SCRIPT_DIR/appdir"
 BUNDLE_SRC="$REPO_ROOT/flutter_desktop/build/linux/x64/release/bundle"
@@ -52,14 +53,9 @@ Icon=com.rgs.deepcool_linux
 StartupWMClass=deepcool-desktop
 DESKTOP_EOF
 
-echo "Copying app icon..."
-if [ -f "$REPO_ROOT/flutter_desktop/assets/app-icon.png" ]; then
-  cp "$REPO_ROOT/flutter_desktop/assets/app-icon.png" \
-    "$BUILD_DIR/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
-else
-  echo "WARNING: app-icon.png not found at:"
-  echo "$REPO_ROOT/flutter_desktop/assets/app-icon.png"
-fi
+echo "Installing app icon..."
+install_256_icon "$REPO_ROOT" \
+  "$BUILD_DIR/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
 
 echo "Building AppImage..."
 

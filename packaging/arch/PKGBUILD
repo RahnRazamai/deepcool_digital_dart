@@ -14,11 +14,11 @@ build() {
 }
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver/flutter_desktop/build/linux/x64/release/bundle"
-  install -Dm755 deepcool_desktop_app "$pkgdir/usr/bin/deepcool-desktop"
+  cd "$srcdir/$pkgname-$pkgver"
+  install -Dm755 flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app "$pkgdir/usr/bin/deepcool-desktop"
   # install desktop file and icons
-  install -Dm644 ../../desktop/com.rgs.deepcool_linux.desktop "$pkgdir/usr/share/applications/com.rgs.deepcool_linux.desktop"
-  install -Dm644 data/flutter_assets/assets/app-icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
+  install -Dm644 flutter_desktop/appdir/usr/share/applications/deepcool-desktop.desktop "$pkgdir/usr/share/applications/com.rgs.deepcool_linux.desktop"
+  install -Dm644 flutter_desktop/appdir/usr/share/icons/hicolor/256x256/apps/deepcool-desktop.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
   # udev rule
-  install -Dm644 ../../udev/99-deepcool-digital.rules "$pkgdir/etc/udev/rules.d/99-deepcool-digital.rules"
+  install -Dm644 udev/99-deepcool-digital.rules "$pkgdir/etc/udev/rules.d/99-deepcool-digital.rules"
 }

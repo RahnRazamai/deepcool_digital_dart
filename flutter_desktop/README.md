@@ -27,7 +27,7 @@ cd flutter_desktop/build/linux/x64/release/bundle
 
 Autostart (user-level):
 - Use the Settings page in the app to set the daemon executable path and toggle user autostart.
-- The app writes a systemd user unit to `~/.config/systemd/user/deepcool-digital-dart.service` and calls `systemctl --user enable --now`.
+- The app writes a systemd user unit to `~/.config/systemd/user/deepcool-digital-dart.service` and runs the daemon with `--mode saved`, so the last saved CPU/GPU/PSU display is restored on login.
 
 Install system service (system-wide):
 - From the Settings page you can "Install systemd service (requires sudo)" which copies a unit to `/etc/systemd/system/` and enables it.

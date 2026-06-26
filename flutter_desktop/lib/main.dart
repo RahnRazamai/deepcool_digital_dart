@@ -1,15 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:deepcool_digital_dart/src/monitor/cpu.dart';
-import 'package:deepcool_digital_dart/src/monitor/gpu.dart';
-import 'package:deepcool_digital_dart/src/monitor/gpu_pci.dart';
-import 'package:deepcool_digital_dart/src/hidapi.dart';
-import 'package:deepcool_digital_dart/src/ch170_display.dart';
-import 'package:deepcool_digital_dart/src/mode.dart';
+import 'package:deepcool_digital_dart/deepcool_digital_dart.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+
+final ValueNotifier<DisplayMode> _savedDisplayModeNotifier =
+    ValueNotifier<DisplayMode>(DisplayMode.cpuFrequency);
 
 void main() {
   runApp(const MyApp());
@@ -142,6 +139,7 @@ Future<void> saveDisplayMode(DisplayMode mode) async {
     displayMode: mode,
   );
   await updated.save();
+  _savedDisplayModeNotifier.value = mode;
 }
 
 Future<String> applyDisplayMode({
@@ -190,13 +188,19 @@ class _MainShellState extends State<MainShell> {
   }
 
   Future<void> _applySavedDisplayMode() async {
-    final cfg = await AppConfig.load();
-    if (cfg.displayMode == DisplayMode.auto) return;
-    await DisplayUpdater.instance.apply(
-      cfg.displayMode,
-      CpuMonitor(),
-      _defaultGpuMonitor(),
-    );
+    try {
+      final cfg = await AppConfig.load();
+      _savedDisplayModeNotifier.value = cfg.displayMode;
+      if (cfg.displayMode == DisplayMode.auto) return;
+      await DisplayUpdater.instance.apply(
+        cfg.displayMode,
+        CpuMonitor(),
+        _defaultGpuMonitor(),
+      );
+    } on Object {
+      // Startup should not fail just because the device is unplugged or udev
+      // permissions are not ready yet.
+    }
   }
 
   @override
@@ -245,55 +249,131 @@ class _MainShellState extends State<MainShell> {
   }
 }
 
-// Simple config helper using JSON in ~/.config/deepcool-desktop/config.json
-class AppConfig {
-  final String daemonPath;
-  final bool autostartUser;
-  final DisplayMode displayMode;
-
-  AppConfig({
-    required this.daemonPath,
-    this.autostartUser = true,
-    this.displayMode = DisplayMode.cpuFrequency,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'daemonPath': daemonPath,
-    'autostartUser': autostartUser,
-    'displayMode': displayMode.symbol,
+String displayModeLabel(DisplayMode mode) {
+  return switch (mode) {
+    DisplayMode.cpuFrequency => 'CPU',
+    DisplayMode.cpuFan => 'CPU fan',
+    DisplayMode.gpu => 'GPU',
+    DisplayMode.psu => 'PSU',
+    DisplayMode.auto => 'Auto',
   };
+}
 
-  static Future<AppConfig> load() async {
-    final cfgFile = File(
-      '${Platform.environment['HOME']}/.config/deepcool-desktop/config.json',
-    );
-    try {
-      if (await cfgFile.exists()) {
-        final text = await cfgFile.readAsString();
-        final m = jsonDecode(text) as Map<String, dynamic>;
-        return AppConfig(
-          daemonPath: m['daemonPath'] ?? '/usr/bin/deepcool-digital-dart',
-          autostartUser: m['autostartUser'] ?? true,
-          displayMode:
-              DisplayModeSymbols.parse(m['displayMode']?.toString() ?? '') ??
-              DisplayMode.cpuFrequency,
-        );
+String buildSavedModeServiceUnit({
+  required String description,
+  required String daemonPath,
+  required String afterTarget,
+  required String wantedBy,
+  String? home,
+}) {
+  final environmentLine = home == null || home.isEmpty
+      ? ''
+      : 'Environment=${_systemdQuote('HOME=$home')}\n';
+
+  return '''[Unit]
+Description=$description
+After=$afterTarget
+
+[Service]
+Type=simple
+${environmentLine}ExecStart=${_systemdQuote(daemonPath)} --mode saved
+Restart=on-failure
+
+[Install]
+WantedBy=$wantedBy
+''';
+}
+
+String _systemdQuote(String value) {
+  final escaped = value
+      .replaceAll('\\', '\\\\')
+      .replaceAll('"', '\\"')
+      .replaceAll('%', '%%');
+  return '"$escaped"';
+}
+
+class UserAutostartService {
+  static const serviceName = 'deepcool-digital-dart.service';
+
+  static Future<bool> isEnabled() async {
+    final unit = _unitFile();
+    return unit != null && await unit.exists();
+  }
+
+  static Future<void> setEnabled({
+    required bool enabled,
+    required String daemonPath,
+  }) async {
+    if (!Platform.isLinux) {
+      if (enabled) {
+        throw UnsupportedError('User autostart is only supported on Linux.');
       }
-    } catch (_) {}
-    return AppConfig(
-      daemonPath: '/usr/bin/deepcool-digital-dart',
-      autostartUser: true,
-    );
+      return;
+    }
+
+    if (enabled) {
+      await _enable(daemonPath);
+    } else {
+      await _disable();
+    }
   }
 
-  Future<void> save() async {
-    final dir = Directory(
-      '${Platform.environment['HOME']}/.config/deepcool-desktop',
+  static Future<void> _enable(String daemonPath) async {
+    final unit = _unitFile();
+    if (unit == null) {
+      throw StateError(
+        'HOME is not set, so the user systemd unit cannot be written.',
+      );
+    }
+
+    await unit.parent.create(recursive: true);
+    await unit.writeAsString(
+      buildSavedModeServiceUnit(
+        description: 'DeepCool Digital Dart Daemon (user)',
+        daemonPath: daemonPath,
+        afterTarget: 'default.target',
+        wantedBy: 'default.target',
+      ),
     );
-    await dir.create(recursive: true);
-    final cfgFile = File('${dir.path}/config.json');
-    await cfgFile.writeAsString(jsonEncode(toJson()));
+
+    await _systemctlUser(['daemon-reload']);
+    await _systemctlUser(['enable', serviceName]);
+    await _systemctlUser(['restart', serviceName]);
   }
+
+  static Future<void> _disable() async {
+    final unit = _unitFile();
+    if (unit == null) return;
+
+    await Process.run('systemctl', ['--user', 'disable', '--now', serviceName]);
+
+    if (await unit.exists()) {
+      await unit.delete();
+    }
+    await Process.run('systemctl', ['--user', 'daemon-reload']);
+  }
+
+  static Future<void> _systemctlUser(List<String> args) async {
+    final result = await Process.run('systemctl', ['--user', ...args]);
+    if (result.exitCode != 0) {
+      throw StateError(
+        'systemctl --user ${args.join(' ')} failed: ${_processOutput(result)}',
+      );
+    }
+  }
+
+  static File? _unitFile() {
+    final home = Platform.environment['HOME'];
+    if (home == null || home.isEmpty) return null;
+    return File('$home/.config/systemd/user/$serviceName');
+  }
+}
+
+String _processOutput(ProcessResult result) {
+  final stderrText = result.stderr.toString().trim();
+  if (stderrText.isNotEmpty) return stderrText;
+  final stdoutText = result.stdout.toString().trim();
+  return stdoutText.isNotEmpty ? stdoutText : 'exit code ${result.exitCode}';
 }
 
 class SettingsPage extends StatefulWidget {
@@ -305,55 +385,121 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final TextEditingController _daemonController = TextEditingController();
-  bool _autostartUser = true;
+  late final VoidCallback _displayModeListener;
+  bool _autostartUser = false;
   DisplayMode _displayMode = DisplayMode.cpuFrequency;
   String _status = '';
 
   @override
   void initState() {
     super.initState();
+    _displayModeListener = () {
+      if (!mounted) return;
+      setState(() => _displayMode = _savedDisplayModeNotifier.value);
+    };
+    _savedDisplayModeNotifier.addListener(_displayModeListener);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _savedDisplayModeNotifier.removeListener(_displayModeListener);
+    _daemonController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
     final cfg = await AppConfig.load();
+    final userAutostartEnabled = await UserAutostartService.isEnabled();
+    _savedDisplayModeNotifier.value = cfg.displayMode;
+    if (!mounted) return;
     setState(() {
       _daemonController.text = cfg.daemonPath;
-      _autostartUser = cfg.autostartUser;
+      _autostartUser = userAutostartEnabled;
       _displayMode = cfg.displayMode;
     });
   }
 
   Future<void> _save() async {
+    final daemonPath = _daemonController.text.trim();
+    if (daemonPath.isEmpty) {
+      setState(() => _status = 'Save failed: daemon executable path is empty');
+      return;
+    }
+
     final cfg = AppConfig(
-      daemonPath: _daemonController.text.trim(),
+      daemonPath: daemonPath,
       autostartUser: _autostartUser,
       displayMode: _displayMode,
     );
     try {
       await cfg.save();
-      setState(() => _status = 'Config saved');
+      await UserAutostartService.setEnabled(
+        enabled: _autostartUser,
+        daemonPath: daemonPath,
+      );
+      setState(() {
+        _status = _autostartUser
+            ? 'Config saved. User autostart will restore the saved ${displayModeLabel(_displayMode)} display.'
+            : 'Config saved. User autostart disabled.';
+      });
     } catch (e) {
       setState(() => _status = 'Save failed: $e');
     }
   }
 
-  Future<void> _installSystemService(bool enable) async {
-    final servicePath = '/etc/systemd/system/deepcool-digital-dart.service';
-    final content =
-        '''[Unit]
-Description=DeepCool Digital Dart Daemon (system)
-After=network.target
+  Future<void> _applySavedModeNow() async {
+    if (_displayMode == DisplayMode.auto) {
+      setState(
+        () => _status = 'Auto mode cannot be applied by the desktop updater.',
+      );
+      return;
+    }
 
-[Service]
-Type=simple
-ExecStart=${_daemonController.text} --mode auto
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-''';
+    setState(
+      () => _status =
+          'Applying saved ${displayModeLabel(_displayMode)} display...',
+    );
     try {
+      await DisplayUpdater.instance.apply(
+        _displayMode,
+        CpuMonitor(),
+        _defaultGpuMonitor(),
+      );
+      setState(
+        () => _status =
+            'Saved ${displayModeLabel(_displayMode)} display is running.',
+      );
+    } on Object catch (e) {
+      setState(() => _status = 'Apply failed: $e');
+    }
+  }
+
+  Future<void> _installSystemService() async {
+    final daemonPath = _daemonController.text.trim();
+    if (daemonPath.isEmpty) {
+      setState(
+        () =>
+            _status = 'System install failed: daemon executable path is empty',
+      );
+      return;
+    }
+
+    final servicePath = '/etc/systemd/system/deepcool-digital-dart.service';
+    final content = buildSavedModeServiceUnit(
+      description: 'DeepCool Digital Dart Daemon (system)',
+      daemonPath: daemonPath,
+      afterTarget: 'network.target',
+      wantedBy: 'multi-user.target',
+      home: Platform.environment['HOME'],
+    );
+    try {
+      await AppConfig(
+        daemonPath: daemonPath,
+        autostartUser: _autostartUser,
+        displayMode: _displayMode,
+      ).save();
+
       final tmp = await File(
         '${Directory.systemTemp.path}/deepcool-digital-dart.service',
       ).create();
@@ -366,17 +512,37 @@ WantedBy=multi-user.target
         setState(() => _status = 'Failed to copy service: ${res.stderr}');
         return;
       }
-      await Process.run('sudo', ['systemctl', 'daemon-reload']);
+      final reloadRes = await Process.run('sudo', [
+        'systemctl',
+        'daemon-reload',
+      ]);
+      if (reloadRes.exitCode != 0) {
+        setState(() => _status = 'Service reload failed: ${reloadRes.stderr}');
+        return;
+      }
       final enableRes = await Process.run('sudo', [
         'systemctl',
         'enable',
-        '--now',
         'deepcool-digital-dart.service',
       ]);
-      if (enableRes.exitCode == 0) {
-        setState(() => _status = 'System service enabled');
-      } else {
+      if (enableRes.exitCode != 0) {
         setState(() => _status = 'Service enable failed: ${enableRes.stderr}');
+        return;
+      }
+      final restartRes = await Process.run('sudo', [
+        'systemctl',
+        'restart',
+        'deepcool-digital-dart.service',
+      ]);
+      if (restartRes.exitCode == 0) {
+        setState(() {
+          _status =
+              'System service enabled. It will restore the saved ${displayModeLabel(_displayMode)} display.';
+        });
+      } else {
+        setState(
+          () => _status = 'Service restart failed: ${restartRes.stderr}',
+        );
       }
     } on Object catch (e) {
       setState(() => _status = 'System install error: $e');
@@ -417,11 +583,18 @@ WantedBy=multi-user.target
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text('Saved display mode: ${_displayMode.symbol}'),
+                  Text(
+                    'Saved display mode: ${displayModeLabel(_displayMode)} (${_displayMode.symbol})',
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Autostart runs the daemon with --mode saved, so the display restores whichever CPU, GPU, or PSU view you saved last.',
+                    style: TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      const Text('User autostart'),
+                      const Text('Run saved display on login'),
                       const SizedBox(width: 12),
                       Switch(
                         value: _autostartUser,
@@ -431,6 +604,11 @@ WantedBy=multi-user.target
                       ElevatedButton(
                         onPressed: _save,
                         child: const Text('Save'),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        onPressed: _applySavedModeNow,
+                        child: const Text('Apply now'),
                       ),
                     ],
                   ),
@@ -451,9 +629,9 @@ WantedBy=multi-user.target
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton(
-                    onPressed: () => _installSystemService(true),
+                    onPressed: _installSystemService,
                     child: const Text(
-                      'Install systemd service (requires sudo)',
+                      'Install saved-mode system service (requires sudo)',
                     ),
                   ),
                 ],

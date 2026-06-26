@@ -86,6 +86,7 @@ Recommended CLI examples:
 dart run bin/deepcool_digital_dart.dart --dry-run
 sudo dart run bin/deepcool_digital_dart.dart --mode cpu_freq
 sudo dart run bin/deepcool_digital_dart.dart --mode gpu
+sudo dart run bin/deepcool_digital_dart.dart --mode saved
 sudo dart run bin/deepcool_digital_dart.dart --mode auto
 ```
 
@@ -111,7 +112,7 @@ Description=DeepCool Digital Dart CH170
 After=multi-user.target
 
 [Service]
-ExecStart=/home/rahngamingstudio/development/deepcool_digital_dart/deepcool-digital-dart --mode auto
+ExecStart=/home/rahngamingstudio/development/deepcool_digital_dart/deepcool-digital-dart --mode saved
 Restart=on-failure
 
 [Install]

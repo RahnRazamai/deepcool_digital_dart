@@ -8,9 +8,11 @@ PKGNAME=deepcool-desktop
 ARCH=amd64
 VERSION=${1:-0.1.0}
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUNDLE="$REPO_ROOT/../flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app"
+PROJECT_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
+BUNDLE="$PROJECT_ROOT/flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app"
 OUTDIR="$REPO_ROOT/out"
 PKGDIR="$OUTDIR/${PKGNAME}_${VERSION}_${ARCH}"
+source "$REPO_ROOT/icon-utils.sh"
 
 rm -rf "$PKGDIR"
 mkdir -p "$PKGDIR/DEBIAN"
@@ -35,9 +37,7 @@ echo "Installing desktop file and icon..."
 if [ -f "$REPO_ROOT/desktop/com.rgs.deepcool_linux.desktop" ]; then
   cp "$REPO_ROOT/desktop/com.rgs.deepcool_linux.desktop" "$PKGDIR/usr/share/applications/"
 fi
-if [ -f "$REPO_ROOT/../flutter_desktop/assets/app-icon.png" ]; then
-  cp "$REPO_ROOT/../flutter_desktop/assets/app-icon.png" "$PKGDIR/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
-fi
+install_256_icon "$PROJECT_ROOT" "$PKGDIR/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
 
 echo "Including udev rule and systemd unit..."
 if [ -f "$REPO_ROOT/udev/99-deepcool-digital.rules" ]; then

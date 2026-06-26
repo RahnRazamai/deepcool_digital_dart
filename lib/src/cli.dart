@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'app_config.dart';
 import 'ch170_display.dart';
 import 'hidapi.dart';
 import 'mode.dart';
@@ -23,6 +24,7 @@ final class CliOptions {
     required this.once,
     required this.help,
     required this.version,
+    required this.useSavedMode,
   });
 
   final DisplayMode mode;
@@ -36,6 +38,7 @@ final class CliOptions {
   final bool once;
   final bool help;
   final bool version;
+  final bool useSavedMode;
 }
 
 final class UsageException implements Exception {
@@ -74,25 +77,30 @@ Future<int> runCli(List<String> arguments) async {
     return _printDeviceList();
   }
 
+  final mode = options.useSavedMode
+      ? (await AppConfig.load()).displayMode
+      : options.mode;
   final productName =
       chGen2ProductNames[options.pid] ?? 'DeepCool PID ${options.pid}';
   print('--- DeepCool Digital Dart ---');
   print('Target: $productName');
-  print('Mode: ${options.mode.symbol}');
+  print(
+    'Mode: ${options.useSavedMode ? 'saved (${mode.symbol})' : mode.symbol}',
+  );
   print('Update: ${options.update.inMilliseconds} ms');
   print('Temperature unit: ${options.fahrenheit ? 'F' : 'C'}');
 
-  if (options.mode == DisplayMode.cpuFan) {
+  if (mode == DisplayMode.cpuFan) {
     stderr.writeln(
       'Warning: CPU fan speed is not implemented yet; zeros are sent for fan RPM.',
     );
   }
-  if (options.mode == DisplayMode.psu) {
+  if (mode == DisplayMode.psu) {
     stderr.writeln(
       'Warning: PSU monitoring is not implemented yet; zeros are sent.',
     );
   }
-  if (options.mode == DisplayMode.auto) {
+  if (mode == DisplayMode.auto) {
     stderr.writeln(
       'Warning: auto cycles only the fully supported CH170 modes: cpu_freq and gpu.',
     );
@@ -101,18 +109,18 @@ Future<int> runCli(List<String> arguments) async {
   final cpu = CpuMonitor();
   print('CPU MON.: ${CpuMonitor.cpuName() ?? 'Unknown CPU'}');
   if (!cpu.hasTemperature &&
-      (options.mode == DisplayMode.cpuFrequency ||
-          options.mode == DisplayMode.cpuFan ||
-          options.mode == DisplayMode.auto)) {
+      (mode == DisplayMode.cpuFrequency ||
+          mode == DisplayMode.cpuFan ||
+          mode == DisplayMode.auto)) {
     stderr.writeln(
       'Warning: no supported CPU temperature sensor was found. '
       'Supported hwmon drivers include asusec, coretemp, k10temp, and zenpower.',
     );
   }
   if (!cpu.hasRapl &&
-      (options.mode == DisplayMode.cpuFrequency ||
-          options.mode == DisplayMode.cpuFan ||
-          options.mode == DisplayMode.auto)) {
+      (mode == DisplayMode.cpuFrequency ||
+          mode == DisplayMode.cpuFan ||
+          mode == DisplayMode.auto)) {
     stderr.writeln(
       'Warning: RAPL energy data was not found; CPU power will show 0 W.',
     );
@@ -127,22 +135,22 @@ Future<int> runCli(List<String> arguments) async {
   final gpu = GpuMonitor.fromPci(selectedGpu);
   print('GPU MON.: ${gpu.label}');
   if (gpu.warning != null &&
-      (options.mode == DisplayMode.gpu || options.mode == DisplayMode.auto)) {
+      (mode == DisplayMode.gpu || mode == DisplayMode.auto)) {
     stderr.writeln('Warning: ${gpu.warning}');
   }
 
   final display = Ch170Display(
     cpu: cpu,
     gpu: gpu,
-    mode: options.mode,
+    mode: mode,
     update: options.update,
     fahrenheit: options.fahrenheit,
   );
 
   if (options.dryRun) {
-    final activeMode = options.mode == DisplayMode.auto
+    final activeMode = mode == DisplayMode.auto
         ? DisplayMode.cpuFrequency
-        : options.mode;
+        : mode;
     final packet = await display.buildStatusPacket(activeMode);
     print('Dry-run packet (${activeMode.symbol}):');
     print(_hex(packet));
@@ -178,6 +186,7 @@ CliOptions _parseArgs(List<String> args) {
   var once = false;
   var help = false;
   var version = false;
+  var useSavedMode = false;
 
   String requireValue(int index, String option) {
     if (index + 1 >= args.length) {
@@ -193,11 +202,16 @@ CliOptions _parseArgs(List<String> args) {
       case '-m':
       case '--mode':
         final value = requireValue(index, arg);
-        final parsed = DisplayModeSymbols.parse(value);
-        if (parsed == null) {
-          throw UsageException('invalid mode "$value"');
+        if (value == 'saved') {
+          useSavedMode = true;
+        } else {
+          final parsed = DisplayModeSymbols.parse(value);
+          if (parsed == null) {
+            throw UsageException('invalid mode "$value"');
+          }
+          mode = parsed;
+          useSavedMode = false;
         }
-        mode = parsed;
         index++;
       case '--pid':
         final value = requireValue(index, arg);
@@ -265,6 +279,7 @@ CliOptions _parseArgs(List<String> args) {
     once: once,
     help: help,
     version: version,
+    useSavedMode: useSavedMode,
   );
 }
 
@@ -333,7 +348,7 @@ const String _usage = '''
 Usage: deepcool-digital-dart [OPTIONS]
 
 CH170-first modes:
-  -m, --mode <MODE>       auto, cpu_freq, gpu, cpu_fan, psu [default: cpu_freq]
+  -m, --mode <MODE>       saved, auto, cpu_freq, gpu, cpu_fan, psu [default: cpu_freq]
       --pid <PID>         Product ID [default: 19 for CH170 DIGITAL]
       --gpuid <VENDOR:N>  Pick GPU, e.g. nvidia:1, amd:1, intel:0
   -u, --update <MS>       Update interval, 100-2000 [default: 1000]
