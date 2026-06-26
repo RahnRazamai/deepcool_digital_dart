@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter Desktop Linux",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/flutter_desktop/lib/main.dart",
+      "cwd": "${workspaceFolder}/flutter_desktop"
+    },
+    {
+      "name": "Flutter Desktop Linux (Release)",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/flutter_desktop/lib/main.dart",
+      "cwd": "${workspaceFolder}/flutter_desktop",
+      "flutterMode": "release"
+    },
+    {
+      "name": "Dart CLI: deepcool_digital_dart",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/bin/deepcool_digital_dart.dart",
+      "cwd": "${workspaceFolder}",
+      "args": ["--help"]
+    }
+  ]
+}

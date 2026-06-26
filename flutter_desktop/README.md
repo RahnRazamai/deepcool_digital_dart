@@ -62,5 +62,3 @@ Notes and troubleshooting:
 - HID access requires `libhidapi` installed on the target system.
 - If the app cannot start the daemon, open `Settings` and set the correct `daemon executable path` (e.g. `/usr/bin/deepcool-digital-dart`).
 - The Settings page can also install the udev rule and systemd unit (prompts for sudo/pkexec when needed).
-
-If you want me to automate creation of a distributable `.deb`, `.AppImage`, or Arch package, tell me which target to prepare first and I'll add build steps and CI-friendly scripts.
