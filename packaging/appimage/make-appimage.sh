@@ -1,4 +1,4 @@
-```bash
+cat > packaging/appimage/make-appimage.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -43,7 +43,7 @@ if [ -d "$BUNDLE_SRC/data" ]; then
 fi
 
 echo "Creating desktop file..."
-cat > "$BUILD_DIR/usr/share/applications/com.rgs.deepcool_linux.desktop" <<EOF
+cat > "$BUILD_DIR/usr/share/applications/com.rgs.deepcool_linux.desktop" <<DESKTOP_EOF
 [Desktop Entry]
 Name=Deepcool Digital Linux
 Exec=deepcool-desktop
@@ -51,7 +51,7 @@ Type=Application
 Categories=Utility;
 Icon=com.rgs.deepcool_linux
 StartupWMClass=deepcool-desktop
-EOF
+DESKTOP_EOF
 
 echo "Copying app icon..."
 if [ -f "$REPO_ROOT/flutter_desktop/assets/app-icon.png" ]; then
@@ -63,6 +63,7 @@ else
 fi
 
 echo "Building AppImage..."
+
 export APPNAME
 export VERSION
 export APPIMAGE_EXTRACT_AND_RUN=1
@@ -76,4 +77,6 @@ linuxdeploy \
   --output appimage
 
 echo "AppImage created."
-```
+EOF
+
+chmod +x packaging/appimage/make-appimage.sh
