@@ -108,8 +108,23 @@ jobs:
           install -Dm755 build/deepcool-digital-dart "$ARCHDIR/$PKGNAME-$PKGVER/build/deepcool-digital-dart"
 
           # Copy packaging extras
-          cp -r packaging/udev "$ARCHDIR/$PKGNAME-$PKGVER/udev"
-          cp -r packaging/systemd "$ARCHDIR/$PKGNAME-$PKGVER/systemd"
+          if [ -d packaging/udev ]; then
+            cp -r packaging/udev "$ARCHDIR/$PKGNAME-$PKGVER/udev"
+          fi
+
+          if [ -d packaging/systemd ]; then
+            cp -r packaging/systemd "$ARCHDIR/$PKGNAME-$PKGVER/systemd"
+          fi
+
+          test -f "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/deepcool_desktop_app"
+          test -f "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/lib/libflutter_linux_gtk.so"
+          test -d "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/data"
+
+          echo "Arch source content:"
+          find "$ARCHDIR/$PKGNAME-$PKGVER" -maxdepth 3 -type f | sort | head -80
+
+          tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
+          m -rf "$ARCHDIR/$PKGNAME-$PKGVER"
 
           tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
           rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"

@@ -3,61 +3,59 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Deepcool Digital Linux GUI for Deepcool Digital devices"
 arch=('x86_64')
-url="https://example"
+url="https://github.com/Nortank12/deepcool_digital_dart"
 license=('GPL')
-depends=(gtk3 hidapi)
-source=("$pkgname-$pkgver.tar.gz")
-install=$pkgname.install
-
-build() {
-  cd "$srcdir/$pkgname-$pkgver/flutter_desktop"
-  if [[ -x build/linux/x64/release/bundle/deepcool_desktop_app ]]; then
-    echo "Using prebuilt Flutter release bundle from source tarball."
-  elif command -v flutter >/dev/null 2>&1; then
-    flutter build linux --release
-  else
-    echo "Flutter release bundle is missing and flutter is not installed." >&2
-    return 1
-  fi
-
-  if [[ ! -x "$srcdir/$pkgname-$pkgver/build/deepcool-digital-dart" ]]; then
-    echo "CLI daemon binary is missing from the source tarball." >&2
-    return 1
-  fi
-}
+depends=('gtk3' 'hidapi')
+source=("${pkgname}-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+install="${pkgname}.install"
+options=('!strip')
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver"
+  cd "$srcdir/${pkgname}-${pkgver}"
 
   # Install full Flutter Linux bundle
-  install -dm755 "$pkgdir/usr/lib/deepcool-desktop"
-  cp -a flutter-bundle/. "$pkgdir/usr/lib/deepcool-desktop/"
+  install -dm755 "$pkgdir/usr/lib/${pkgname}"
+  cp -a flutter-bundle/. "$pkgdir/usr/lib/${pkgname}/"
+
+  chmod +x "$pkgdir/usr/lib/${pkgname}/deepcool_desktop_app"
 
   # GUI launcher wrapper
-  install -dm755 "$pkgdir/usr/bin"
-
-  cat > "$pkgdir/usr/bin/deepcool-desktop" <<'EOF'
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/deepcool-desktop" <<'EOF'
 #!/usr/bin/env bash
 set -e
+
 APPDIR="/usr/lib/deepcool-desktop"
+
+cd "$APPDIR"
 export LD_LIBRARY_PATH="$APPDIR/lib:${LD_LIBRARY_PATH:-}"
+
 exec "$APPDIR/deepcool_desktop_app" "$@"
 EOF
-
-  chmod 755 "$pkgdir/usr/bin/deepcool-desktop"
 
   # CLI daemon
   install -Dm755 build/deepcool-digital-dart "$pkgdir/usr/bin/deepcool-digital-dart"
 
   # udev rule
-  install -Dm644 udev/99-deepcool-digital.rules \
-    "$pkgdir/etc/udev/rules.d/99-deepcool-digital.rules"
-
-  # systemd files, only if you have them
-  if [ -d systemd ]; then
-    install -dm755 "$pkgdir/usr/lib/systemd/system"
-    cp -a systemd/*.service "$pkgdir/usr/lib/systemd/system/" 2>/dev/null || true
+  if [ -f udev/99-deepcool-digital.rules ]; then
+    install -Dm644 udev/99-deepcool-digital.rules \
+      "$pkgdir/usr/lib/udev/rules.d/99-deepcool-digital.rules"
   fi
 
-  # Desktop file and icon should stay wherever your current PKGBUILD already installs them
+  # systemd service
+  if compgen -G "systemd/*.service" > /dev/null; then
+    install -dm755 "$pkgdir/usr/lib/systemd/system"
+    install -Dm644 systemd/*.service -t "$pkgdir/usr/lib/systemd/system/"
+  fi
+
+  # desktop file
+  if compgen -G "applications/*.desktop" > /dev/null; then
+    install -dm755 "$pkgdir/usr/share/applications"
+    install -Dm644 applications/*.desktop -t "$pkgdir/usr/share/applications/"
+  fi
+
+  # icons
+  if [ -d icons ]; then
+    cp -a icons/. "$pkgdir/usr/share/icons/"
+  fi
 }
