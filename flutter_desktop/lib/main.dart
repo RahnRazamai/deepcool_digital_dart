@@ -15,6 +15,58 @@ void main() {
   runApp(const MyApp());
 }
 
+Future<String> sendStatusPacket({
+  required DisplayMode mode,
+  required CpuMonitor cpu,
+  required GpuMonitor gpu,
+}) async {
+  try {
+    final api = HidApi();
+    final device = api.open(
+      vendorId: deepCoolVendorId,
+      productId: ch170ProductId,
+    );
+    final display = Ch170Display(
+      cpu: cpu,
+      gpu: gpu,
+      mode: mode,
+      update: const Duration(milliseconds: 100),
+      fahrenheit: false,
+    );
+    final packet = await display.buildStatusPacket(mode);
+    device.write(packet);
+    device.close();
+    api.dispose();
+    return 'Packet sent to device';
+  } on Object catch (e) {
+    return 'Failed to send: $e';
+  }
+}
+
+Future<void> saveDisplayMode(DisplayMode mode) async {
+  final config = await AppConfig.load();
+  final updated = AppConfig(
+    daemonPath: config.daemonPath,
+    autostartUser: config.autostartUser,
+    displayMode: mode,
+  );
+  await updated.save();
+}
+
+Future<String> applyDisplayMode({
+  required DisplayMode mode,
+  required CpuMonitor cpu,
+  required GpuMonitor gpu,
+}) async {
+  await saveDisplayMode(mode);
+  final status = await sendStatusPacket(mode: mode, cpu: cpu, gpu: gpu);
+  return 'Saved display mode ${mode.symbol}. $status';
+}
+
+GpuMonitor _defaultGpuMonitor() {
+  return GpuMonitor.fromPci(selectGpu(listPciGpus(), null));
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -52,15 +104,15 @@ class _MainShellState extends State<MainShell> {
             destinations: const [
               NavigationRailDestination(
                 icon: Icon(Icons.monitor),
-                label: Text('Monitor'),
+                label: Text('CPU'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.graphic_eq),
                 label: Text('GPU'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.gamepad),
-                label: Text('Controls'),
+                icon: Icon(Icons.power),
+                label: Text('PSU'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.settings),
@@ -75,7 +127,7 @@ class _MainShellState extends State<MainShell> {
               children: const [
                 MonitorPage(),
                 GpuPage(),
-                ControlsPage(),
+                PsuPage(),
                 SettingsPage(),
               ],
             ),
@@ -90,12 +142,18 @@ class _MainShellState extends State<MainShell> {
 class AppConfig {
   final String daemonPath;
   final bool autostartUser;
+  final DisplayMode displayMode;
 
-  AppConfig({required this.daemonPath, this.autostartUser = true});
+  AppConfig({
+    required this.daemonPath,
+    this.autostartUser = true,
+    this.displayMode = DisplayMode.cpuFrequency,
+  });
 
   Map<String, dynamic> toJson() => {
     'daemonPath': daemonPath,
     'autostartUser': autostartUser,
+    'displayMode': displayMode.symbol,
   };
 
   static Future<AppConfig> load() async {
@@ -109,6 +167,10 @@ class AppConfig {
         return AppConfig(
           daemonPath: m['daemonPath'] ?? '/usr/bin/deepcool-digital-dart',
           autostartUser: m['autostartUser'] ?? true,
+          displayMode: DisplayModeSymbols.parse(
+                m['displayMode']?.toString() ?? '',
+              ) ??
+              DisplayMode.cpuFrequency,
         );
       }
     } catch (_) {}
@@ -138,6 +200,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final TextEditingController _daemonController = TextEditingController();
   bool _autostartUser = true;
+  DisplayMode _displayMode = DisplayMode.cpuFrequency;
   String _status = '';
 
   @override
@@ -151,6 +214,7 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _daemonController.text = cfg.daemonPath;
       _autostartUser = cfg.autostartUser;
+      _displayMode = cfg.displayMode;
     });
   }
 
@@ -158,6 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final cfg = AppConfig(
       daemonPath: _daemonController.text.trim(),
       autostartUser: _autostartUser,
+      displayMode: _displayMode,
     );
     try {
       await cfg.save();
@@ -246,6 +311,8 @@ WantedBy=multi-user.target
                     ),
                   ),
                   const SizedBox(height: 8),
+                  Text('Saved display mode: ${_displayMode.symbol}'),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
                       const Text('User autostart'),
@@ -305,13 +372,75 @@ class MonitorPage extends StatefulWidget {
 class _MonitorPageState extends State<MonitorPage> {
   final CpuMonitor _monitor = CpuMonitor();
   CpuSample? _prevSample;
+  int _usagePercent = 0;
+  int _cpuPowerWatts = 0;
+  String _cpuName = 'Unknown CPU';
+  int _memTotal = 0;
+  int _memAvailable = 0;
+  int _memUsed = 0;
+  int _memUsagePercent = 0;
+  int? _prevEnergy;
+  DateTime? _prevEnergyReadTime;
+  String _sendStatus = '';
+  bool _isSending = false;
   final List<FlSpot> _points = [];
   Timer? _timer;
+
+  void _refreshRam() {
+    final meminfo = _readMemInfo();
+    setState(() {
+      _memTotal = meminfo['MemTotal'] ?? 0;
+      _memAvailable = meminfo['MemAvailable'] ?? 0;
+      _memUsed = _memTotal - _memAvailable;
+      _memUsagePercent = _memTotal > 0 ? ((_memUsed * 100) ~/ _memTotal) : 0;
+    });
+  }
+
+  Map<String, int> _readMemInfo() {
+    try {
+      final lines = File('/proc/meminfo').readAsLinesSync();
+      final values = <String, int>{};
+      for (final line in lines) {
+        final parts = line.split(':');
+        if (parts.length != 2) continue;
+        final key = parts[0].trim();
+        final value = int.tryParse(parts[1].trim().split(' ').first);
+        if (value != null) {
+          values[key] = value;
+        }
+      }
+      return values;
+    } on FileSystemException {
+      return const {};
+    }
+  }
+
+  Future<void> _sendCpuStatus() async {
+    setState(() {
+      _isSending = true;
+      _sendStatus = '';
+    });
+    final status = await applyDisplayMode(
+      mode: DisplayMode.cpuFrequency,
+      cpu: _monitor,
+      gpu: _defaultGpuMonitor(),
+    );
+    setState(() {
+      _isSending = false;
+      _sendStatus = status;
+    });
+  }
 
   @override
   void initState() {
     super.initState();
+    _cpuName = CpuMonitor.cpuName() ?? 'Unknown CPU';
     _prevSample = _monitor.readUsageSample();
+    if (_monitor.hasRapl) {
+      _prevEnergy = _monitor.readEnergyMicrojoules();
+      _prevEnergyReadTime = DateTime.now();
+    }
+    _refreshRam();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
@@ -331,16 +460,34 @@ class _MonitorPageState extends State<MonitorPage> {
           : ((totalDelta - idleDelta) * 100) / totalDelta;
       final x = DateTime.now().millisecondsSinceEpoch / 1000.0;
       setState(() {
+        _usagePercent = usage.round().clamp(0, 100);
         _points.add(FlSpot(x, usage.toDouble()));
         if (_points.length > 60) _points.removeAt(0);
       });
     }
     if (current != null) _prevSample = current;
+
+    if (_monitor.hasRapl) {
+      final now = DateTime.now();
+      final currentEnergy = _monitor.readEnergyMicrojoules();
+      final elapsed = now.difference(_prevEnergyReadTime ?? now);
+      if (_prevEnergy != null && elapsed.inMilliseconds > 0) {
+        setState(() {
+          _cpuPowerWatts = _monitor.powerWattsSince(_prevEnergy!, elapsed);
+        });
+      }
+      _prevEnergy = currentEnergy;
+      _prevEnergyReadTime = now;
+    }
+
+    _refreshRam();
   }
 
   @override
   Widget build(BuildContext context) {
     final freq = _monitor.frequencyMhz();
+    final temp = _monitor.temperature(fahrenheit: false);
+    final power = _cpuPowerWatts;
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -358,7 +505,29 @@ class _MonitorPageState extends State<MonitorPage> {
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
+                  Text('Model: $_cpuName'),
+                  const SizedBox(height: 6),
                   Text('Frequency: ${freq > 0 ? '$freq MHz' : 'N/A'}'),
+                  Text('Temperature: ${temp > 0 ? '$temp °C' : 'N/A'}'),
+                  Text('Power: ${power > 0 ? '$power W' : 'N/A'}'),
+                  const SizedBox(height: 6),
+                  Text('Memory: ${_memUsed > 0 ? '${_memUsed ~/ 1024} / ${_memTotal ~/ 1024} MB' : 'N/A'}'),
+                  Text('Available: ${_memAvailable > 0 ? '${_memAvailable ~/ 1024} MB' : 'N/A'}'),
+                  Text('Memory Usage: $_memUsagePercent%'),
+                  const SizedBox(height: 6),
+                  Text('CPU Usage: $_usagePercent%'),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: _isSending ? null : _sendCpuStatus,
+                    icon: const Icon(Icons.send),
+                    label: Text(
+                      _isSending ? 'Saving...' : 'Show CPU on DeepCool display',
+                    ),
+                  ),
+                  if (_sendStatus.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(_sendStatus),
+                  ],
                 ],
               ),
             ),
@@ -426,35 +595,84 @@ class GpuPage extends StatefulWidget {
 }
 
 class _GpuPageState extends State<GpuPage> {
+  List<PciGpu> _gpus = [];
+  PciGpu? _selectedGpu;
   GpuMonitor? _monitor;
   String _label = 'Detecting GPU...';
+  int _usagePercent = 0;
+  int _gpuPowerWatts = 0;
+  int _gpuFrequency = 0;
+  int? _gpuTemperature;
+  String _sendStatus = '';
+  bool _isSending = false;
   final List<FlSpot> _points = [];
   Timer? _timer;
+
+  Future<void> _sendGpuStatus() async {
+    if (_monitor == null) return;
+    setState(() {
+      _isSending = true;
+      _sendStatus = '';
+    });
+    final status = await applyDisplayMode(
+      mode: DisplayMode.gpu,
+      cpu: CpuMonitor(),
+      gpu: _monitor!,
+    );
+    setState(() {
+      _isSending = false;
+      _sendStatus = status;
+    });
+  }
 
   @override
   void initState() {
     super.initState();
-    _detect();
+    _discoverGpus();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
-  void _detect() {
+  void _discoverGpus() {
     final gpus = listPciGpus();
-    final selected = selectGpu(gpus, null);
-    final monitor = GpuMonitor.fromPci(selected);
+    final chosen = _selectedGpu != null
+        ? gpus.firstWhere(
+            (gpu) => gpu.address == _selectedGpu!.address,
+            orElse: () => gpus.isNotEmpty ? gpus.first : _selectedGpu!,
+          )
+        : (gpus.isNotEmpty ? gpus.first : null);
+    _setGpu(chosen, gpus);
+  }
+
+  void _setGpu(PciGpu? gpu, List<PciGpu> gpus) {
+    final monitor = GpuMonitor.fromPci(gpu);
     setState(() {
+      _gpus = gpus;
+      _selectedGpu = gpu;
       _monitor = monitor;
       _label = monitor.isAvailable
           ? monitor.label
           : (monitor.warning ?? 'No GPU');
+      _usagePercent = 0;
+      _gpuPowerWatts = 0;
+      _gpuFrequency = 0;
+      _gpuTemperature = null;
+      _points.clear();
     });
   }
 
   void _tick() {
     if (_monitor == null || !_monitor!.isAvailable) return;
     final usage = _monitor!.usagePercent().toDouble();
+    final freq = _monitor!.frequencyMhz();
+    final temp = _monitor!.temperature(fahrenheit: false);
+    final power = _monitor!.powerWatts();
     final x = DateTime.now().millisecondsSinceEpoch / 1000.0;
+
     setState(() {
+      _usagePercent = usage.round().clamp(0, 100);
+      _gpuFrequency = freq;
+      _gpuTemperature = temp > 0 ? temp : null;
+      _gpuPowerWatts = power;
       _points.add(FlSpot(x, usage));
       if (_points.length > 60) _points.removeAt(0);
     });
@@ -468,15 +686,44 @@ class _GpuPageState extends State<GpuPage> {
 
   @override
   Widget build(BuildContext context) {
-    final temp = _monitor?.temperature(fahrenheit: false);
-    final freq = _monitor?.frequencyMhz() ?? 0;
-    final power = _monitor?.powerWatts() ?? 0;
+    final selectedName = _selectedGpu?.name ?? 'No GPU detected';
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'GPU Selection',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<PciGpu>(
+                    initialValue: _selectedGpu,
+                    items: _gpus.map((gpu) {
+                      return DropdownMenuItem(
+                        value: gpu,
+                        child: Text('${gpu.name} (${gpu.address})'),
+                      );
+                    }).toList(),
+                    onChanged: (gpu) => _setGpu(gpu, _gpus),
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'GPU',
+                    ),
+                    disabledHint: Text(selectedName),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12.0),
@@ -494,9 +741,28 @@ class _GpuPageState extends State<GpuPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text('Temp: ${temp != null ? '$temp °C' : 'N/A'}'),
-                      Text('Freq: ${freq > 0 ? '$freq MHz' : 'N/A'}'),
-                      Text('Power: ${power > 0 ? '$power W' : 'N/A'}'),
+                      Text('Usage: $_usagePercent%'),
+                      Text(
+                        'Freq: ${_gpuFrequency > 0 ? '$_gpuFrequency MHz' : 'N/A'}',
+                      ),
+                      Text(
+                        'Temp: ${_gpuTemperature != null ? '$_gpuTemperature °C' : 'N/A'}',
+                      ),
+                      Text(
+                        'Power: ${_gpuPowerWatts > 0 ? '$_gpuPowerWatts W' : 'N/A'}',
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: _isSending ? null : _sendGpuStatus,
+                        icon: const Icon(Icons.send),
+                        label: Text(
+                          _isSending ? 'Saving...' : 'Show GPU on DeepCool display',
+                        ),
+                      ),
+                      if (_sendStatus.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(_sendStatus),
+                      ],
                     ],
                   ),
                   const Icon(
@@ -547,59 +813,31 @@ class _GpuPageState extends State<GpuPage> {
   }
 }
 
-class ControlsPage extends StatefulWidget {
-  const ControlsPage({super.key});
+class PsuPage extends StatefulWidget {
+  const PsuPage({super.key});
 
   @override
-  State<ControlsPage> createState() => _ControlsPageState();
+  State<PsuPage> createState() => _PsuPageState();
 }
 
-class _ControlsPageState extends State<ControlsPage> {
-  List<HidDeviceInfo> _devices = [];
-  String _status = '';
+class _PsuPageState extends State<PsuPage> {
+  bool _isSending = false;
+  String _sendStatus = '';
 
-  Future<void> _refresh() async {
-    try {
-      final api = HidApi();
-      final list = api.enumerate();
-      api.dispose();
-      setState(() => _devices = list);
-    } on Object catch (e) {
-      setState(() => _status = 'HIDAPI error: $e');
-    }
-  }
-
-  Future<void> _sendSample() async {
-    try {
-      final api = HidApi();
-      final device = api.open(
-        vendorId: deepCoolVendorId,
-        productId: ch170ProductId,
-      );
-      final cpu = CpuMonitor();
-      final gpus = listPciGpus();
-      final gpu = GpuMonitor.fromPci(selectGpu(gpus, null));
-      final display = Ch170Display(
-        cpu: cpu,
-        gpu: gpu,
-        mode: DisplayMode.cpuFrequency,
-        update: const Duration(milliseconds: 100),
-        fahrenheit: false,
-      );
-      final packet = await display.buildStatusPacket(DisplayMode.cpuFrequency);
-      device.write(packet);
-      device.close();
-      api.dispose();
-      setState(() => _status = 'Packet sent to device');
-    } on Object catch (e) {
-      setState(() => _status = 'Failed to send: $e');
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _refresh();
+  Future<void> _sendPsuStatus() async {
+    setState(() {
+      _isSending = true;
+      _sendStatus = '';
+    });
+    final status = await applyDisplayMode(
+      mode: DisplayMode.psu,
+      cpu: CpuMonitor(),
+      gpu: _defaultGpuMonitor(),
+    );
+    setState(() {
+      _isSending = false;
+      _sendStatus = status;
+    });
   }
 
   @override
@@ -609,44 +847,38 @@ class _ControlsPageState extends State<ControlsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: _refresh,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Refresh'),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                onPressed: _sendSample,
-                icon: const Icon(Icons.send),
-                label: const Text('Send sample to CH170'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text('Status: $_status'),
-          const SizedBox(height: 12),
-          Expanded(
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: _devices.isEmpty
-                    ? const Center(child: Text('No HID devices found'))
-                    : ListView.builder(
-                        itemCount: _devices.length,
-                        itemBuilder: (context, index) {
-                          final d = _devices[index];
-                          return ListTile(
-                            title: Text(
-                              d.product.isNotEmpty ? d.product : d.path,
-                            ),
-                            subtitle: Text(
-                              'VID=0x${d.vendorId.toRadixString(16)} PID=0x${d.productId.toRadixString(16)}',
-                            ),
-                          );
-                        },
-                      ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'PSU Display Mode',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Use this button to save PSU mode as the active DeepCool display setting.',
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Actual PSU metrics are not available on this system, but the device will remain in PSU display mode.',
+                    style: TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: _isSending ? null : _sendPsuStatus,
+                    icon: const Icon(Icons.send),
+                    label: Text(
+                      _isSending ? 'Saving...' : 'Show PSU on DeepCool display',
+                    ),
+                  ),
+                  if (_sendStatus.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(_sendStatus),
+                  ],
+                ],
               ),
             ),
           ),

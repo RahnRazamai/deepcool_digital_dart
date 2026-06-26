@@ -100,7 +100,9 @@ List<PciGpu> listPciGpus() {
         vendor: vendor,
         bus: bus,
         address: address,
-        name: '${vendor.label} ${bus > 0 ? 'GPU' : 'iGPU'}',
+        name:
+            _readPciDeviceName(address) ??
+            '${vendor.label} ${bus > 0 ? 'GPU' : 'iGPU'}',
       ),
     );
   }
@@ -181,4 +183,28 @@ int? _parseBus(String pciAddress) {
     return null;
   }
   return int.tryParse(parts[1], radix: 16);
+}
+
+String? _readPciDeviceName(String address) {
+  try {
+    final result = Process.runSync('lspci', ['-s', address, '-vmm']);
+    if (result.exitCode != 0) {
+      return null;
+    }
+    final lines = (result.stdout as String).split('\n');
+    final values = <String, String>{};
+    for (final line in lines) {
+      final parts = line.split(':');
+      if (parts.length < 2) continue;
+      values[parts[0].trim()] = parts.sublist(1).join(':').trim();
+    }
+    final vendor = values['Vendor'];
+    final device = values['Device'];
+    if (vendor == null || device == null) {
+      return null;
+    }
+    return '$vendor $device';
+  } on ProcessException {
+    return null;
+  }
 }

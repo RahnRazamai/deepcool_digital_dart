@@ -31,7 +31,11 @@ jobs:
         working-directory: flutter_desktop
 
       - name: Build .deb package
-        run: bash packaging/debian/make-deb.sh 0.1.0
+        run: |
+          VERSION=${{ github.ref_name || '0.1.0' }}
+          # strip leading v if present
+          VERSION=${VERSION#v}
+          bash packaging/debian/make-deb.sh "$VERSION"
 
       - name: Download linuxdeploy and appimagetool
         run: |
@@ -57,6 +61,27 @@ jobs:
           bash packaging/appimage/make-appimage.sh
         working-directory: packaging/appimage
 
+      - name: Prepare Arch source tarball
+        run: |
+          set -euo pipefail
+          PKGNAME=deepcool-desktop
+          ARCHDIR=packaging/arch
+          # read pkgver from PKGBUILD so the tarball name matches
+          PKGVER=$(awk -F= '/^pkgver=/ {print $2; exit}' "$ARCHDIR/PKGBUILD")
+          mkdir -p "$ARCHDIR/$PKGNAME-$PKGVER"
+          cp -r flutter_desktop "$ARCHDIR/$PKGNAME-$PKGVER/"
+          cp -r udev "$ARCHDIR/$PKGNAME-$PKGVER/" || true
+          cp -r systemd "$ARCHDIR/$PKGNAME-$PKGVER/" || true
+          tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
+          rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"
+
+      - name: Build Arch package (in Arch container)
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/work -w /work/packaging/arch archlinux:latest /bin/bash -lc "pacman -Sy --noconfirm --needed base-devel wget git && ls -la && makepkg -C --skipinteg --noconfirm"
+        env:
+          CI: true
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -64,6 +89,7 @@ jobs:
           path: |
             packaging/out/**/*.deb
             packaging/appimage/*.AppImage
+            packaging/arch/*.pkg.*
 
       - name: Create GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
@@ -94,6 +120,13 @@ jobs:
           done
           echo "Uploading AppImage files..."
           for f in packaging/appimage/*.AppImage; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            echo "Uploading $name"
+            curl -s -X POST -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" "$UPLOAD_URL?name=$name"
+          done
+          echo "Uploading Arch packages..."
+          for f in packaging/arch/*.pkg.*; do
             [ -f "$f" ] || continue
             name=$(basename "$f")
             echo "Uploading $name"

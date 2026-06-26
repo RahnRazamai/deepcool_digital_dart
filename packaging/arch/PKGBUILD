@@ -1,7 +1,7 @@
 pkgname=deepcool-desktop
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="DeepCool Desktop GUI for DeepCool Digital devices"
+pkgdesc="Deepcool Digital Linux GUI for Deepcool Digital devices"
 arch=('x86_64')
 url="https://example"
 license=('GPL')
@@ -16,7 +16,9 @@ build() {
 package() {
   cd "$srcdir/$pkgname-$pkgver/flutter_desktop/build/linux/x64/release/bundle"
   install -Dm755 deepcool_desktop_app "$pkgdir/usr/bin/deepcool-desktop"
-  install -Dm644 data/* "$pkgdir/usr/share/deepcool-desktop/"
+  # install desktop file and icons
+  install -Dm644 ../../desktop/com.rgs.deepcool_linux.desktop "$pkgdir/usr/share/applications/com.rgs.deepcool_linux.desktop"
+  install -Dm644 data/flutter_assets/assets/app-icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
   # udev rule
   install -Dm644 ../../udev/99-deepcool-digital.rules "$pkgdir/etc/udev/rules.d/99-deepcool-digital.rules"
 }

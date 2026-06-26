@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build a .deb package for DeepCool Desktop from the release bundle.
+# Build a .deb package for Deepcool Digital Linux from the release bundle.
 # Usage: ./make-deb.sh [version]
 
 PKGNAME=deepcool-desktop
@@ -15,6 +15,8 @@ PKGDIR="$OUTDIR/${PKGNAME}_${VERSION}_${ARCH}"
 rm -rf "$PKGDIR"
 mkdir -p "$PKGDIR/DEBIAN"
 mkdir -p "$PKGDIR/usr/bin"
+mkdir -p "$PKGDIR/usr/share/applications"
+mkdir -p "$PKGDIR/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "$PKGDIR/etc/udev/rules.d"
 mkdir -p "$PKGDIR/etc/systemd/system"
 mkdir -p "$PKGDIR/usr/share/doc/$PKGNAME"
@@ -28,6 +30,14 @@ fi
 echo "Copying binary..."
 cp "$BUNDLE" "$PKGDIR/usr/bin/deepcool-desktop"
 chmod 755 "$PKGDIR/usr/bin/deepcool-desktop"
+
+echo "Installing desktop file and icon..."
+if [ -f "$REPO_ROOT/desktop/com.rgs.deepcool_linux.desktop" ]; then
+  cp "$REPO_ROOT/desktop/com.rgs.deepcool_linux.desktop" "$PKGDIR/usr/share/applications/"
+fi
+if [ -f "$REPO_ROOT/../flutter_desktop/assets/app-icon.png" ]; then
+  cp "$REPO_ROOT/../flutter_desktop/assets/app-icon.png" "$PKGDIR/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
+fi
 
 echo "Including udev rule and systemd unit..."
 if [ -f "$REPO_ROOT/udev/99-deepcool-digital.rules" ]; then
@@ -62,6 +72,12 @@ fi
 if command -v udevadm >/dev/null 2>&1; then
   udevadm control --reload || true
   udevadm trigger || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications || true
 fi
 EOP
 

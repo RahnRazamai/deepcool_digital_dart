@@ -1,0 +1,2 @@
+# udev rule for DeepCool CH170 devices
+ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE:="0666", TAG+="uaccess"

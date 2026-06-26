@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+  # Try to enable the system service if present
+  if [ -f /etc/systemd/system/deepcool-digital-dart.service ]; then
+    systemctl enable --now deepcool-digital-dart.service || true
+  fi
+fi
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload || true
+  udevadm trigger || true
+fi
+ # update icon cache and desktop database
+ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+   gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
+ fi
+ if command -v update-desktop-database >/dev/null 2>&1; then
+   update-desktop-database /usr/share/applications || true
+ fi

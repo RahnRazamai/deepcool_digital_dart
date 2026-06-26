@@ -1,4 +1,4 @@
-# DeepCool Desktop App
+# Deepcool Digital Linux
 
 This is a Flutter desktop app that connects to the `deepcool_digital_dart` package to display CPU and GPU monitoring information and send HID commands to supported devices.
 

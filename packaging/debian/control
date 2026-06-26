@@ -7,5 +7,5 @@ Standards-Version: 4.5.0
 Package: deepcool-desktop
 Architecture: amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}, libhidapi0
-Description: DeepCool Desktop GUI for CH170 devices
- A GTK desktop application to control and display DeepCool device information.
+Description: Deepcool Digital Linux GUI for CH170 devices
+ A GTK desktop application to control and display Deepcool device information.
