@@ -32,9 +32,12 @@ jobs:
 
       - name: Build .deb package
         run: |
-          VERSION=${{ github.ref_name || '0.1.0' }}
-          # strip leading v if present
-          VERSION=${VERSION#v}
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.1.0"
+          fi
+
           bash packaging/debian/make-deb.sh "$VERSION"
 
       - name: Download linuxdeploy and appimagetool
@@ -55,7 +58,13 @@ jobs:
 
       - name: Build AppImage
         run: |
-          bash make-appimage.sh
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.1.0"
+          fi
+
+          bash make-appimage.sh "$VERSION"
         working-directory: packaging/appimage
 
       - name: Prepare Arch source tarball
