@@ -1,64 +1,46 @@
 # Deepcool Digital Linux
 
-This is a Flutter desktop app that connects to the `deepcool_digital_dart` package to display CPU and GPU monitoring information and send HID commands to supported devices.
+Flutter desktop app for DeepCool Digital displays.
 
-Run locally (development):
+Supported models include AG/AK air coolers, LD/LP/LQ/LS liquid coolers, and
+CH/MORPHEUS cases listed in the main README.
+
+Most users should install a packaged release from the main README. This folder
+is mainly for development.
+
+## Run From Source
 
 ```bash
-cd flutter_desktop
 flutter pub get
 flutter run -d linux
 ```
 
-Build a release bundle (Linux):
+## Build
 
 ```bash
-cd flutter_desktop
 flutter build linux --release
-# bundle located at flutter_desktop/build/linux/x64/release/bundle
 ```
 
-Run the built binary (from bundle):
+The release bundle is written to:
+
+```text
+flutter_desktop/build/linux/x64/release/bundle
+```
+
+The app also needs the background daemon if you want **Keep display running** to
+work from a source checkout:
 
 ```bash
-cd flutter_desktop/build/linux/x64/release/bundle
-./deepcool_desktop_app
+cd ..
+dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 ```
 
-Autostart (user-level):
-- Use the Settings page in the app to set the daemon executable path and toggle user autostart.
-- The app writes a systemd user unit to `~/.config/systemd/user/deepcool-digital-dart.service` and runs the daemon with `--mode saved`, so the last saved CPU/GPU/PSU display is restored on login.
+## App Flow
 
-Install system service (system-wide):
-- From the Settings page you can "Install systemd service (requires sudo)" which copies a unit to `/etc/systemd/system/` and enables it.
+1. Save CPU, GPU, or PSU mode.
+2. Turn on **Keep display running**.
+3. Approve the admin prompt if device access needs to be installed.
+4. Unplug and reconnect the display once if the app installs device access.
 
-Udev rule (device access):
-- A sample udev rule is provided at `packaging/udev/99-deepcool-digital.rules`.
-- Install with:
-
-```bash
-sudo cp packaging/udev/99-deepcool-digital.rules /etc/udev/rules.d/
-sudo udevadm control --reload
-sudo udevadm trigger
-```
-
-Packaging helpers:
-- AppImage: `packaging/appimage/make-appimage.sh` — requires `linuxdeploy` and `appimagetool`.
-- Debian: skeleton in `packaging/debian/` (use `dpkg-deb` / `debhelper` to build).
-- Arch: `packaging/arch/PKGBUILD` is a template for `makepkg`.
-
-Quick packaging script (examples):
-
-```bash
-# AppImage (after building release bundle)
-bash packaging/appimage/make-appimage.sh
-
-# Arch/Deb templates
-bash packaging/make-packages.sh arch
-bash packaging/make-packages.sh deb
-```
-
-Notes and troubleshooting:
-- HID access requires `libhidapi` installed on the target system.
-- If the app cannot start the daemon, open `Settings` and set the correct `daemon executable path` (e.g. `/usr/bin/deepcool-digital-dart`).
-- The Settings page can also install the udev rule and systemd unit (prompts for sudo/pkexec when needed).
+The top toggle starts a user-level background service with `--mode saved`, so
+the display keeps working after the GUI closes and after login.

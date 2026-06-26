@@ -18,6 +18,12 @@ const Map<int, String> chGen2ProductNames = {
   ch690ProductId: 'CH690 DIGITAL',
 };
 
+const List<int> chGen2ProductIds = [
+  ch170ProductId,
+  ch270ProductId,
+  ch690ProductId,
+];
+
 const Duration autoModeInterval = Duration(seconds: 5);
 
 final class Ch170Display {
@@ -59,6 +65,9 @@ final class Ch170Display {
           _setUint16Be(data, 15, cpu.frequencyMhz());
         }
       case DisplayMode.gpu:
+      case DisplayMode.gpuTemperature:
+      case DisplayMode.gpuUsage:
+      case DisplayMode.gpuPower:
         await Future<void>.delayed(update);
 
         _setUint16Be(data, 19, gpu.powerWatts());
@@ -72,6 +81,10 @@ final class Ch170Display {
       case DisplayMode.psu:
         await Future<void>.delayed(update);
       case DisplayMode.auto:
+      case DisplayMode.cpu:
+      case DisplayMode.cpuTemperature:
+      case DisplayMode.cpuUsage:
+      case DisplayMode.cpuPower:
         throw ArgumentError('auto must be resolved before building a packet');
     }
 

@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'app_config.dart';
 import 'ch170_display.dart';
+import 'deepcool_devices.dart';
+import 'deepcool_display.dart';
 import 'hidapi.dart';
 import 'mode.dart';
 import 'monitor/cpu.dart';
@@ -77,13 +79,28 @@ Future<int> runCli(List<String> arguments) async {
     return _printDeviceList();
   }
 
+  late final DeepCoolDeviceTarget target;
+  try {
+    final resolvedTarget = _resolveTarget(options);
+    if (resolvedTarget == null) {
+      stderr.writeln(
+        'Error: no supported DeepCool Digital display was found. '
+        'Supported: ${supportedDeepCoolProductNames()}.',
+      );
+      stderr.writeln('Use --list to show detected DeepCool HID devices.');
+      return 1;
+    }
+    target = resolvedTarget;
+  } on Object catch (error) {
+    stderr.writeln('Error: $error');
+    return 1;
+  }
+
   final mode = options.useSavedMode
       ? (await AppConfig.load()).displayMode
       : options.mode;
-  final productName =
-      chGen2ProductNames[options.pid] ?? 'DeepCool PID ${options.pid}';
   print('--- DeepCool Digital Dart ---');
-  print('Target: $productName');
+  print('Target: ${target.name}');
   print(
     'Mode: ${options.useSavedMode ? 'saved (${mode.symbol})' : mode.symbol}',
   );
@@ -102,7 +119,7 @@ Future<int> runCli(List<String> arguments) async {
   }
   if (mode == DisplayMode.auto) {
     stderr.writeln(
-      'Warning: auto cycles only the fully supported CH170 modes: cpu_freq and gpu.',
+      'Warning: auto cycles only the fully supported modes: cpu_freq and gpu.',
     );
   }
 
@@ -139,7 +156,8 @@ Future<int> runCli(List<String> arguments) async {
     stderr.writeln('Warning: ${gpu.warning}');
   }
 
-  final display = Ch170Display(
+  final display = DeepCoolDisplay(
+    target: target,
     cpu: cpu,
     gpu: gpu,
     mode: mode,
@@ -148,20 +166,22 @@ Future<int> runCli(List<String> arguments) async {
   );
 
   if (options.dryRun) {
-    final activeMode = mode == DisplayMode.auto
-        ? DisplayMode.cpuFrequency
-        : mode;
-    final packet = await display.buildStatusPacket(activeMode);
-    print('Dry-run packet (${activeMode.symbol}):');
-    print(_hex(packet));
-    return 0;
+    try {
+      final packet = await display.buildStatusPacket(mode);
+      print('Dry-run packet (${mode.symbol}):');
+      print(_hex(packet));
+      return 0;
+    } on Object catch (error) {
+      stderr.writeln('Error: $error');
+      return 1;
+    }
   }
 
   HidApi? api;
   HidDevice? device;
   try {
     api = HidApi();
-    device = api.open(vendorId: deepCoolVendorId, productId: options.pid);
+    device = api.open(vendorId: target.vendorId, productId: target.productId);
     print('Writing HID reports. Press Ctrl-C to stop.');
     await display.run(device, once: options.once);
     return 0;
@@ -176,7 +196,7 @@ Future<int> runCli(List<String> arguments) async {
 
 CliOptions _parseArgs(List<String> args) {
   var mode = DisplayMode.cpuFrequency;
-  var pid = ch170ProductId;
+  var pid = 0;
   GpuSelection? gpuSelection;
   var update = const Duration(milliseconds: 1000);
   var fahrenheit = false;
@@ -283,12 +303,44 @@ CliOptions _parseArgs(List<String> args) {
   );
 }
 
+DeepCoolDeviceTarget? _resolveTarget(CliOptions options) {
+  if (options.pid > 0) {
+    if (options.dryRun) {
+      final definition = deepCoolDeviceDefinitionForProductId(options.pid);
+      return definition == null ? null : DeepCoolDeviceTarget(definition);
+    }
+
+    HidApi? api;
+    try {
+      api = HidApi();
+      return findSupportedDeepCoolDisplay(api, productId: options.pid);
+    } finally {
+      api?.dispose();
+    }
+  }
+  if (options.dryRun) {
+    final definition = deepCoolDeviceDefinitionFor(
+      vendorId: deepCoolVendorId,
+      productId: ch170ProductId,
+    );
+    return definition == null ? null : DeepCoolDeviceTarget(definition);
+  }
+
+  HidApi? api;
+  try {
+    api = HidApi();
+    return findSupportedDeepCoolDisplay(api);
+  } finally {
+    api?.dispose();
+  }
+}
+
 int _printDeviceList() {
   HidApi? api;
   try {
     api = HidApi();
-    final devices = api.enumerate(vendorId: deepCoolVendorId);
-    print('Device list [PID | Name | Interface]');
+    final devices = enumerateSupportedDeepCoolDisplays(api);
+    print('Device list [VID | PID | Name | Interface]');
     print('-----');
     if (devices.isEmpty) {
       print('No DeepCool HID devices were found.');
@@ -296,10 +348,9 @@ int _printDeviceList() {
     }
 
     for (final device in devices) {
-      final knownName = chGen2ProductNames[device.productId];
       print(
-        '${device.productId} | ${knownName ?? device.product.ifEmpty('DeepCool device')} '
-        '| ${device.interfaceNumber}',
+        '0x${device.vendorId.toRadixString(16)} | ${device.productId} | '
+        '${device.name} | ${device.deviceInfo?.interfaceNumber ?? '-'}',
       );
     }
     return 0;
@@ -347,9 +398,11 @@ String _hex(Uint8List bytes) {
 const String _usage = '''
 Usage: deepcool-digital-dart [OPTIONS]
 
-CH170-first modes:
-  -m, --mode <MODE>       saved, auto, cpu_freq, gpu, cpu_fan, psu [default: cpu_freq]
-      --pid <PID>         Product ID [default: 19 for CH170 DIGITAL]
+Display modes:
+  -m, --mode <MODE>       saved, auto, cpu, cpu_temp, cpu_usage, cpu_power,
+                          cpu_freq, cpu_fan, gpu, gpu_temp, gpu_usage,
+                          gpu_power, psu [default: cpu_freq]
+      --pid <PID>         Product ID [default: auto-detect supported display]
       --gpuid <VENDOR:N>  Pick GPU, e.g. nvidia:1, amd:1, intel:0
   -u, --update <MS>       Update interval, 100-2000 [default: 1000]
   -f, --fahrenheit        Send temperatures as Fahrenheit
@@ -357,12 +410,8 @@ CH170-first modes:
 Commands:
   -l, --list              List DeepCool HID devices
   -g, --gpulist           List supported GPUs
-      --dry-run           Build and print one CH170 packet without HID
+      --dry-run           Build and print one packet without HID
       --once              Send one HID report and exit
   -h, --help              Print help
   -v, --version           Print version
 ''';
-
-extension on String {
-  String ifEmpty(String fallback) => isEmpty ? fallback : this;
-}

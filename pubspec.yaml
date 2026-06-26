@@ -1,5 +1,5 @@
 name: deepcool_digital_dart
-description: Unofficial GPLv3 Dart CLI for DeepCool Digital devices, focused on CH170 DIGITAL.
+description: Unofficial GPLv3 Dart CLI for DeepCool Digital devices.
 version: 0.1.0
 publish_to: none
 

@@ -5,17 +5,31 @@ pkgdesc="Deepcool Digital Linux GUI for Deepcool Digital devices"
 arch=('x86_64')
 url="https://example"
 license=('GPL')
-depends=(libc libhidapi)
+depends=(gtk3 hidapi)
 source=("$pkgname-$pkgver.tar.gz")
+install=$pkgname.install
 
 build() {
   cd "$srcdir/$pkgname-$pkgver/flutter_desktop"
-  flutter build linux --release
+  if [[ -x build/linux/x64/release/bundle/deepcool_desktop_app ]]; then
+    echo "Using prebuilt Flutter release bundle from source tarball."
+  elif command -v flutter >/dev/null 2>&1; then
+    flutter build linux --release
+  else
+    echo "Flutter release bundle is missing and flutter is not installed." >&2
+    return 1
+  fi
+
+  if [[ ! -x "$srcdir/$pkgname-$pkgver/build/deepcool-digital-dart" ]]; then
+    echo "CLI daemon binary is missing from the source tarball." >&2
+    return 1
+  fi
 }
 
 package() {
   cd "$srcdir/$pkgname-$pkgver"
   install -Dm755 flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app "$pkgdir/usr/bin/deepcool-desktop"
+  install -Dm755 build/deepcool-digital-dart "$pkgdir/usr/bin/deepcool-digital-dart"
   # install desktop file and icons
   install -Dm644 flutter_desktop/appdir/usr/share/applications/deepcool-desktop.desktop "$pkgdir/usr/share/applications/com.rgs.deepcool_linux.desktop"
   install -Dm644 flutter_desktop/appdir/usr/share/icons/hicolor/256x256/apps/deepcool-desktop.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"

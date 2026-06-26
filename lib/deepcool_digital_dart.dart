@@ -1,5 +1,7 @@
 export 'src/app_config.dart';
 export 'src/ch170_display.dart';
+export 'src/deepcool_devices.dart';
+export 'src/deepcool_display.dart';
 export 'src/hidapi.dart';
 export 'src/mode.dart';
 export 'src/monitor/cpu.dart';

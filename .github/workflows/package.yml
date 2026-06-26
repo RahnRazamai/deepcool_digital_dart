@@ -30,6 +30,9 @@ jobs:
         run: flutter build linux --release
         working-directory: flutter_desktop
 
+      - name: Build CLI daemon
+        run: dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
+
       - name: Build .deb package
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
@@ -73,17 +76,35 @@ jobs:
           ARCHDIR=packaging/arch
           # read pkgver from PKGBUILD so the tarball name matches
           PKGVER=$(awk -F= '/^pkgver=/ {print $2; exit}' "$ARCHDIR/PKGBUILD")
+          rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"
           mkdir -p "$ARCHDIR/$PKGNAME-$PKGVER"
+          test -f flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app
+          test -x build/deepcool-digital-dart
           cp -r flutter_desktop "$ARCHDIR/$PKGNAME-$PKGVER/"
-          cp -r udev "$ARCHDIR/$PKGNAME-$PKGVER/" || true
-          cp -r systemd "$ARCHDIR/$PKGNAME-$PKGVER/" || true
+          install -Dm755 build/deepcool-digital-dart "$ARCHDIR/$PKGNAME-$PKGVER/build/deepcool-digital-dart"
+          cp -r packaging/udev "$ARCHDIR/$PKGNAME-$PKGVER/udev"
+          cp -r packaging/systemd "$ARCHDIR/$PKGNAME-$PKGVER/systemd"
           tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
           rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"
 
       - name: Build Arch package (in Arch container)
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD":/work -w /work/packaging/arch archlinux:latest /bin/bash -lc "pacman -Sy --noconfirm --needed base-devel wget git && ls -la && makepkg -C --skipinteg --noconfirm"
+          docker run --rm -v "$PWD":/work -w /work/packaging/arch archlinux:latest /bin/bash -lc '
+            set -euo pipefail
+            pacman -Sy --noconfirm --needed base-devel wget git gtk3 hidapi
+            host_uid=$(stat -c "%u" /work)
+            host_gid=$(stat -c "%g" /work)
+            if ! getent group "$host_gid" >/dev/null; then
+              groupadd -g "$host_gid" builder
+            fi
+            host_group=$(getent group "$host_gid" | cut -d: -f1)
+            if ! id -u builder >/dev/null 2>&1; then
+              useradd -m -u "$host_uid" -g "$host_group" builder
+            fi
+            chown -R "$host_uid:$host_gid" /work/packaging/arch
+            runuser -u builder -- makepkg -C --skipinteg --noconfirm
+          '
         env:
           CI: true
 

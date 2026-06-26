@@ -8,6 +8,12 @@ import 'package:fl_chart/fl_chart.dart';
 final ValueNotifier<DisplayMode> _savedDisplayModeNotifier =
     ValueNotifier<DisplayMode>(DisplayMode.cpuFrequency);
 
+const String deepCoolUdevRules = '''
+# udev rules for DeepCool Digital HID devices
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="3633", MODE:="0666", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="34d3", ATTRS{idProduct}=="1100", MODE:="0666", TAG+="uaccess"
+''';
+
 void main() {
   runApp(const MyApp());
 }
@@ -17,27 +23,41 @@ Future<String> sendStatusPacket({
   required CpuMonitor cpu,
   required GpuMonitor gpu,
 }) async {
+  HidApi? api;
+  HidDevice? device;
   try {
-    final api = HidApi();
-    final device = api.open(
-      vendorId: deepCoolVendorId,
-      productId: ch170ProductId,
-    );
-    final display = Ch170Display(
+    api = HidApi();
+    final target = _requireSupportedDeepCoolDisplay(api);
+    device = api.open(vendorId: target.vendorId, productId: target.productId);
+    final display = DeepCoolDisplay(
+      target: target,
       cpu: cpu,
       gpu: gpu,
       mode: mode,
       update: const Duration(milliseconds: 100),
       fahrenheit: false,
     );
+    await display.writeInitialPackets(device);
     final packet = await display.buildStatusPacket(mode);
     device.write(packet);
-    device.close();
-    api.dispose();
-    return 'Packet sent to device';
+    return 'Packet sent to ${target.name}';
   } on Object catch (e) {
-    return 'Failed to send: $e';
+    return 'Failed to send. ${userFacingDeviceMessage(e)}';
+  } finally {
+    device?.close();
+    api?.dispose();
   }
+}
+
+DeepCoolDeviceTarget _requireSupportedDeepCoolDisplay(HidApi api) {
+  final target = findSupportedDeepCoolDisplay(api);
+  if (target == null) {
+    throw HidException(
+      'No supported DeepCool Digital display found. '
+      'Supported devices: ${supportedDeepCoolProductNames()}.',
+    );
+  }
+  return target;
 }
 
 class DisplayUpdater {
@@ -47,6 +67,7 @@ class DisplayUpdater {
   DisplayMode? _mode;
   CpuMonitor? _cpu;
   GpuMonitor? _gpu;
+  DeepCoolDeviceTarget? _target;
   HidApi? _api;
   HidDevice? _device;
   bool _canceled = false;
@@ -61,6 +82,7 @@ class DisplayUpdater {
     } catch (_) {}
     _device = null;
     _api = null;
+    _target = null;
   }
 
   Future<void> _stopLoop() async {
@@ -82,13 +104,19 @@ class DisplayUpdater {
     final mode = _mode;
     final cpu = _cpu;
     final gpu = _gpu;
-    if (mode == null || cpu == null || gpu == null || _device == null) {
+    final target = _target;
+    if (mode == null ||
+        cpu == null ||
+        gpu == null ||
+        target == null ||
+        _device == null) {
       return;
     }
 
     while (!_canceled) {
       try {
-        final display = Ch170Display(
+        final display = DeepCoolDisplay(
+          target: target,
           cpu: cpu,
           gpu: gpu,
           mode: mode,
@@ -106,22 +134,37 @@ class DisplayUpdater {
 
   Future<void> apply(DisplayMode mode, CpuMonitor cpu, GpuMonitor gpu) async {
     await _stopLoop();
+    await _disposeDevice();
 
     _mode = mode;
     _cpu = cpu;
     _gpu = gpu;
 
+    HidApi? api;
+    HidDevice? device;
     try {
-      _api = HidApi();
-      _device = _api!.open(
-        vendorId: deepCoolVendorId,
-        productId: ch170ProductId,
+      api = HidApi();
+      final target = _requireSupportedDeepCoolDisplay(api);
+      device = api.open(vendorId: target.vendorId, productId: target.productId);
+      final display = DeepCoolDisplay(
+        target: target,
+        cpu: cpu,
+        gpu: gpu,
+        mode: mode,
+        update: const Duration(milliseconds: 100),
+        fahrenheit: false,
       );
+      await display.writeInitialPackets(device);
+      device.write(await display.buildStatusPacket(mode));
+      _target = target;
     } on Object {
-      await _disposeDevice();
+      device?.close();
+      api?.dispose();
       rethrow;
     }
 
+    _api = api;
+    _device = device;
     _loopFuture = _runLoop();
   }
 
@@ -148,8 +191,94 @@ Future<String> applyDisplayMode({
   required GpuMonitor gpu,
 }) async {
   await saveDisplayMode(mode);
-  await DisplayUpdater.instance.apply(mode, cpu, gpu);
-  return 'Saved display mode ${mode.symbol}. Display updater running.';
+  final backgroundError = await startSavedDisplayDaemon();
+  if (backgroundError == null) {
+    return 'Saved ${displayModeLabel(mode)} display. Background daemon is running, so it will keep updating after you close the app.';
+  }
+
+  try {
+    await DisplayUpdater.instance.apply(mode, cpu, gpu);
+    return 'Saved ${displayModeLabel(mode)} display. It will keep updating while this app stays open. $backgroundError';
+  } on Object catch (e) {
+    return 'Saved ${displayModeLabel(mode)} display. $backgroundError ${userFacingDeviceMessage(e)}';
+  }
+}
+
+Future<String?> startSavedDisplayDaemon() async {
+  if (!Platform.isLinux) {
+    return 'Background display updates are only supported on Linux.';
+  }
+
+  final cfg = await AppConfig.load();
+  if (!cfg.autostartUser) {
+    return 'Turn on "Keep display running" at the top of the app to keep it active after closing.';
+  }
+  final daemonPath = await ensureStableDaemonPath(cfg.daemonPath);
+  if (daemonPath == null) {
+    return 'Background daemon is not installed. Install the packaged app, or run "dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart".';
+  }
+  if (daemonPath != cfg.daemonPath) {
+    await AppConfig(
+      daemonPath: daemonPath,
+      autostartUser: cfg.autostartUser,
+      displayMode: cfg.displayMode,
+    ).save();
+  }
+
+  try {
+    await UserAutostartService.start(
+      daemonPath: daemonPath,
+      enableOnLogin: true,
+    );
+    await DisplayUpdater.instance.stop();
+    return null;
+  } on Object catch (e) {
+    return 'Could not start the background daemon: $e';
+  }
+}
+
+Future<String?> ensureStableDaemonPath([String? preferredPath]) async {
+  final preferred = preferredPath?.trim();
+  if (preferred != null && preferred.isNotEmpty) {
+    final preferredFile = File(preferred);
+    if (await preferredFile.exists()) {
+      return preferredFile.path;
+    }
+  }
+
+  final executableDir = File(Platform.resolvedExecutable).parent.path;
+  final candidates = [
+    '$executableDir/deepcool-digital-dart',
+    '/usr/bin/deepcool-digital-dart',
+    '${Directory.current.path}/build/deepcool-digital-dart',
+  ];
+
+  for (final path in candidates) {
+    final file = File(path);
+    if (await file.exists()) {
+      if (path.contains('/.mount_') || path.startsWith('/tmp/')) {
+        return _copyDaemonToUserData(file);
+      }
+      return path;
+    }
+  }
+
+  return null;
+}
+
+Future<String> _copyDaemonToUserData(File source) async {
+  final dataHome = Platform.environment['XDG_DATA_HOME'];
+  final home = Platform.environment['HOME'];
+  final baseDir = dataHome != null && dataHome.isNotEmpty
+      ? dataHome
+      : (home != null && home.isNotEmpty
+            ? '$home/.local/share'
+            : Directory.current.path);
+  final target = File('$baseDir/deepcool-desktop/deepcool-digital-dart');
+  await target.parent.create(recursive: true);
+  await source.copy(target.path);
+  await Process.run('chmod', ['755', target.path]);
+  return target.path;
 }
 
 GpuMonitor _defaultGpuMonitor() {
@@ -191,6 +320,10 @@ class _MainShellState extends State<MainShell> {
     try {
       final cfg = await AppConfig.load();
       _savedDisplayModeNotifier.value = cfg.displayMode;
+      if (cfg.autostartUser) {
+        await startSavedDisplayDaemon();
+        return;
+      }
       if (cfg.displayMode == DisplayMode.auto) return;
       await DisplayUpdater.instance.apply(
         cfg.displayMode,
@@ -225,21 +358,19 @@ class _MainShellState extends State<MainShell> {
                 icon: Icon(Icons.power),
                 label: Text('PSU'),
               ),
-              NavigationRailDestination(
-                icon: Icon(Icons.settings),
-                label: Text('Settings'),
-              ),
             ],
           ),
           const VerticalDivider(width: 1),
           Expanded(
-            child: IndexedStack(
-              index: _index,
-              children: const [
-                MonitorPage(),
-                GpuPage(),
-                PsuPage(),
-                SettingsPage(),
+            child: Column(
+              children: [
+                const PersistentDisplayControl(),
+                Expanded(
+                  child: IndexedStack(
+                    index: _index,
+                    children: const [MonitorPage(), GpuPage(), PsuPage()],
+                  ),
+                ),
               ],
             ),
           ),
@@ -251,9 +382,16 @@ class _MainShellState extends State<MainShell> {
 
 String displayModeLabel(DisplayMode mode) {
   return switch (mode) {
+    DisplayMode.cpu => 'CPU',
+    DisplayMode.cpuTemperature => 'CPU temperature',
+    DisplayMode.cpuUsage => 'CPU usage',
+    DisplayMode.cpuPower => 'CPU power',
     DisplayMode.cpuFrequency => 'CPU',
     DisplayMode.cpuFan => 'CPU fan',
     DisplayMode.gpu => 'GPU',
+    DisplayMode.gpuTemperature => 'GPU temperature',
+    DisplayMode.gpuUsage => 'GPU usage',
+    DisplayMode.gpuPower => 'GPU power',
     DisplayMode.psu => 'PSU',
     DisplayMode.auto => 'Auto',
   };
@@ -296,8 +434,17 @@ class UserAutostartService {
   static const serviceName = 'deepcool-digital-dart.service';
 
   static Future<bool> isEnabled() async {
-    final unit = _unitFile();
-    return unit != null && await unit.exists();
+    if (!Platform.isLinux) return false;
+    try {
+      final result = await Process.run('systemctl', [
+        '--user',
+        'is-enabled',
+        serviceName,
+      ]);
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> setEnabled({
@@ -312,13 +459,16 @@ class UserAutostartService {
     }
 
     if (enabled) {
-      await _enable(daemonPath);
+      await start(daemonPath: daemonPath, enableOnLogin: true);
     } else {
       await _disable();
     }
   }
 
-  static Future<void> _enable(String daemonPath) async {
+  static Future<void> start({
+    required String daemonPath,
+    bool enableOnLogin = false,
+  }) async {
     final unit = _unitFile();
     if (unit == null) {
       throw StateError(
@@ -337,7 +487,9 @@ class UserAutostartService {
     );
 
     await _systemctlUser(['daemon-reload']);
-    await _systemctlUser(['enable', serviceName]);
+    if (enableOnLogin) {
+      await _systemctlUser(['enable', serviceName]);
+    }
     await _systemctlUser(['restart', serviceName]);
   }
 
@@ -376,19 +528,112 @@ String _processOutput(ProcessResult result) {
   return stdoutText.isNotEmpty ? stdoutText : 'exit code ${result.exitCode}';
 }
 
-class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
-
-  @override
-  State<SettingsPage> createState() => _SettingsPageState();
+String userFacingDeviceMessage(Object error) {
+  if (error is HidException) {
+    if (error.message.contains('No supported DeepCool Digital display')) {
+      return 'No supported DeepCool Digital display was found. Connect one of: ${supportedDeepCoolProductNames()}.';
+    }
+    if (error.message.contains('Could not load HIDAPI')) {
+      return 'HIDAPI is not installed. Install the hidapi package for your distro, then reopen the app.';
+    }
+    if (error.message.contains('Failed to open HID device')) {
+      return 'Linux is blocking access to the DeepCool display. Turn on "Keep display running" at the top of the app, approve the prompt, then unplug and reconnect the display.';
+    }
+  }
+  return error.toString();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
-  final TextEditingController _daemonController = TextEditingController();
+String _adminActionMessage(String action, ProcessResult result) {
+  final output = _processOutput(result);
+  if (output.toLowerCase().contains('dismissed') ||
+      output.toLowerCase().contains('cancel')) {
+    return '$action was cancelled.';
+  }
+  return '$action failed: $output';
+}
+
+String _shellQuote(String value) {
+  return "'${value.replaceAll("'", "'\"'\"'")}'";
+}
+
+Future<ProcessResult> _runPrivilegedScript(String script) async {
+  if (!await _commandExists('pkexec')) {
+    throw StateError(
+      'pkexec/polkit is not available for a graphical admin prompt.',
+    );
+  }
+
+  final scriptFile = File(
+    '${Directory.systemTemp.path}/deepcool-setup-${DateTime.now().microsecondsSinceEpoch}.sh',
+  );
+  await scriptFile.writeAsString(script);
+  return Process.run('pkexec', ['sh', scriptFile.path]);
+}
+
+Future<bool> _commandExists(String cmd) async {
+  try {
+    final res = await Process.run('which', [cmd]);
+    return res.exitCode == 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> isDeviceAccessRuleInstalled() async {
+  if (!Platform.isLinux) return false;
+  final ruleFile = File('/etc/udev/rules.d/99-deepcool-digital.rules');
+  try {
+    if (!await ruleFile.exists()) return false;
+    final text = await ruleFile.readAsString();
+    return text.contains('ATTRS{idVendor}=="3633"') &&
+        text.contains('ATTRS{idVendor}=="34d3"') &&
+        text.contains('ATTRS{idProduct}=="1100"');
+  } on Object {
+    return false;
+  }
+}
+
+Future<String?> ensureDeviceAccessRuleInstalled() async {
+  if (!Platform.isLinux || await isDeviceAccessRuleInstalled()) {
+    return null;
+  }
+
+  final ruleFile = File(
+    '${Directory.systemTemp.path}/99-deepcool-digital.rules',
+  );
+  await ruleFile.writeAsString(deepCoolUdevRules);
+
+  final result = await _runPrivilegedScript('''
+set -e
+install -Dm644 ${_shellQuote(ruleFile.path)} /etc/udev/rules.d/99-deepcool-digital.rules
+udevadm control --reload-rules || udevadm control --reload || true
+udevadm trigger || true
+''');
+
+  if (result.exitCode == 0) {
+    return 'Device access rule installed. Unplug and reconnect the display once.';
+  }
+
+  throw StateError(
+    _adminActionMessage('Installing the device access rule', result),
+  );
+}
+
+class PersistentDisplayControl extends StatefulWidget {
+  const PersistentDisplayControl({super.key});
+
+  @override
+  State<PersistentDisplayControl> createState() =>
+      _PersistentDisplayControlState();
+}
+
+class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
   late final VoidCallback _displayModeListener;
-  bool _autostartUser = false;
+  bool _enabled = false;
+  bool _busy = false;
   DisplayMode _displayMode = DisplayMode.cpuFrequency;
-  String _status = '';
+  String _status =
+      'Save CPU, GPU, or PSU, then turn this on to keep it running.';
 
   @override
   void initState() {
@@ -404,243 +649,135 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     _savedDisplayModeNotifier.removeListener(_displayModeListener);
-    _daemonController.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     final cfg = await AppConfig.load();
-    final userAutostartEnabled = await UserAutostartService.isEnabled();
+    final enabled = await UserAutostartService.isEnabled();
     _savedDisplayModeNotifier.value = cfg.displayMode;
     if (!mounted) return;
     setState(() {
-      _daemonController.text = cfg.daemonPath;
-      _autostartUser = userAutostartEnabled;
+      _enabled = enabled;
       _displayMode = cfg.displayMode;
+      _status = enabled
+          ? 'Enabled. ${displayModeLabel(cfg.displayMode)} will run after closing and at login.'
+          : 'Save CPU, GPU, or PSU, then turn this on to keep it running.';
     });
   }
 
-  Future<void> _save() async {
-    final daemonPath = _daemonController.text.trim();
-    if (daemonPath.isEmpty) {
-      setState(() => _status = 'Save failed: daemon executable path is empty');
-      return;
-    }
+  Future<void> _setEnabled(bool enabled) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = enabled ? 'Enabling persistent display...' : 'Disabling...';
+    });
 
-    final cfg = AppConfig(
-      daemonPath: daemonPath,
-      autostartUser: _autostartUser,
-      displayMode: _displayMode,
-    );
     try {
-      await cfg.save();
-      await UserAutostartService.setEnabled(
-        enabled: _autostartUser,
-        daemonPath: daemonPath,
-      );
-      setState(() {
-        _status = _autostartUser
-            ? 'Config saved. User autostart will restore the saved ${displayModeLabel(_displayMode)} display.'
-            : 'Config saved. User autostart disabled.';
-      });
-    } catch (e) {
-      setState(() => _status = 'Save failed: $e');
-    }
-  }
+      if (enabled) {
+        final cfg = await AppConfig.load();
+        final daemonPath = await ensureStableDaemonPath(cfg.daemonPath);
+        if (daemonPath == null) {
+          setState(() {
+            _enabled = false;
+            _status =
+                'Background daemon is not installed. Install a package build or compile it from source.';
+          });
+          return;
+        }
+        final accessMessage = await ensureDeviceAccessRuleInstalled();
 
-  Future<void> _applySavedModeNow() async {
-    if (_displayMode == DisplayMode.auto) {
-      setState(
-        () => _status = 'Auto mode cannot be applied by the desktop updater.',
-      );
-      return;
-    }
-
-    setState(
-      () => _status =
-          'Applying saved ${displayModeLabel(_displayMode)} display...',
-    );
-    try {
-      await DisplayUpdater.instance.apply(
-        _displayMode,
-        CpuMonitor(),
-        _defaultGpuMonitor(),
-      );
-      setState(
-        () => _status =
-            'Saved ${displayModeLabel(_displayMode)} display is running.',
-      );
-    } on Object catch (e) {
-      setState(() => _status = 'Apply failed: $e');
-    }
-  }
-
-  Future<void> _installSystemService() async {
-    final daemonPath = _daemonController.text.trim();
-    if (daemonPath.isEmpty) {
-      setState(
-        () =>
-            _status = 'System install failed: daemon executable path is empty',
-      );
-      return;
-    }
-
-    final servicePath = '/etc/systemd/system/deepcool-digital-dart.service';
-    final content = buildSavedModeServiceUnit(
-      description: 'DeepCool Digital Dart Daemon (system)',
-      daemonPath: daemonPath,
-      afterTarget: 'network.target',
-      wantedBy: 'multi-user.target',
-      home: Platform.environment['HOME'],
-    );
-    try {
-      await AppConfig(
-        daemonPath: daemonPath,
-        autostartUser: _autostartUser,
-        displayMode: _displayMode,
-      ).save();
-
-      final tmp = await File(
-        '${Directory.systemTemp.path}/deepcool-digital-dart.service',
-      ).create();
-      await tmp.writeAsString(content);
-      // try pkexec first, then sudo
-      final res = await (await _which('pkexec')
-          ? Process.run('pkexec', ['cp', tmp.path, servicePath])
-          : Process.run('sudo', ['cp', tmp.path, servicePath]));
-      if (res.exitCode != 0) {
-        setState(() => _status = 'Failed to copy service: ${res.stderr}');
-        return;
-      }
-      final reloadRes = await Process.run('sudo', [
-        'systemctl',
-        'daemon-reload',
-      ]);
-      if (reloadRes.exitCode != 0) {
-        setState(() => _status = 'Service reload failed: ${reloadRes.stderr}');
-        return;
-      }
-      final enableRes = await Process.run('sudo', [
-        'systemctl',
-        'enable',
-        'deepcool-digital-dart.service',
-      ]);
-      if (enableRes.exitCode != 0) {
-        setState(() => _status = 'Service enable failed: ${enableRes.stderr}');
-        return;
-      }
-      final restartRes = await Process.run('sudo', [
-        'systemctl',
-        'restart',
-        'deepcool-digital-dart.service',
-      ]);
-      if (restartRes.exitCode == 0) {
+        await AppConfig(
+          daemonPath: daemonPath,
+          autostartUser: true,
+          displayMode: cfg.displayMode,
+        ).save();
+        await UserAutostartService.start(
+          daemonPath: daemonPath,
+          enableOnLogin: true,
+        );
+        await DisplayUpdater.instance.stop();
         setState(() {
+          _enabled = true;
           _status =
-              'System service enabled. It will restore the saved ${displayModeLabel(_displayMode)} display.';
+              '${accessMessage == null ? '' : '$accessMessage '}Enabled. ${displayModeLabel(cfg.displayMode)} will keep running after close and at login.';
         });
       } else {
-        setState(
-          () => _status = 'Service restart failed: ${restartRes.stderr}',
+        final cfg = await AppConfig.load();
+        await AppConfig(
+          daemonPath: cfg.daemonPath,
+          autostartUser: false,
+          displayMode: cfg.displayMode,
+        ).save();
+        await UserAutostartService.setEnabled(
+          enabled: false,
+          daemonPath: cfg.daemonPath,
         );
+        setState(() {
+          _enabled = false;
+          _status = 'Disabled. Saved views update while the app is open.';
+        });
       }
     } on Object catch (e) {
-      setState(() => _status = 'System install error: $e');
-    }
-  }
-
-  Future<bool> _which(String cmd) async {
-    try {
-      final res = await Process.run('which', [cmd]);
-      return res.exitCode == 0;
-    } catch (_) {
-      return false;
+      setState(() {
+        _enabled = !enabled;
+        _status = enabled
+            ? 'Could not enable persistent display: $e'
+            : 'Could not disable persistent display: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(color: theme.dividerColor.withValues(alpha: 0.35)),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              _enabled ? Icons.offline_bolt : Icons.offline_bolt_outlined,
+              color: _enabled ? theme.colorScheme.primary : Colors.white70,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'Daemon Settings',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _daemonController,
-                    decoration: const InputDecoration(
-                      label: Text('Daemon executable path'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
                   Text(
-                    'Saved display mode: ${displayModeLabel(_displayMode)} (${_displayMode.symbol})',
+                    'Keep display running',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Autostart runs the daemon with --mode saved, so the display restores whichever CPU, GPU, or PSU view you saved last.',
-                    style: TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('Run saved display on login'),
-                      const SizedBox(width: 12),
-                      Switch(
-                        value: _autostartUser,
-                        onChanged: (v) => setState(() => _autostartUser = v),
-                      ),
-                      const Spacer(),
-                      ElevatedButton(
-                        onPressed: _save,
-                        child: const Text('Save'),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton(
-                        onPressed: _applySavedModeNow,
-                        child: const Text('Apply now'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'System integration',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: _installSystemService,
-                    child: const Text(
-                      'Install saved-mode system service (requires sudo)',
+                  const SizedBox(height: 2),
+                  Text(
+                    'Saved: ${displayModeLabel(_displayMode)}. $_status',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white70,
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Text('Status: $_status'),
-        ],
+            const SizedBox(width: 12),
+            Switch(value: _enabled, onChanged: _busy ? null : _setEnabled),
+          ],
+        ),
       ),
     );
   }

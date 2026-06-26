@@ -10,6 +10,7 @@ VERSION=${1:-0.1.0}
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 BUNDLE="$PROJECT_ROOT/flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app"
+DAEMON_BINARY="$PROJECT_ROOT/build/deepcool-digital-dart"
 OUTDIR="$REPO_ROOT/out"
 PKGDIR="$OUTDIR/${PKGNAME}_${VERSION}_${ARCH}"
 source "$REPO_ROOT/icon-utils.sh"
@@ -28,10 +29,22 @@ if [ ! -f "$BUNDLE" ]; then
   echo "Build with: (from repo root) flutter_desktop && flutter build linux --release"
   exit 1
 fi
+if [ ! -x "$DAEMON_BINARY" ]; then
+  if command -v dart >/dev/null 2>&1; then
+    echo "Compiling CLI daemon..."
+    (cd "$PROJECT_ROOT" && dart compile exe bin/deepcool_digital_dart.dart -o "$DAEMON_BINARY")
+  else
+    echo "CLI daemon binary not found at $DAEMON_BINARY"
+    echo "Build with: dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart"
+    exit 1
+  fi
+fi
 
-echo "Copying binary..."
+echo "Copying binaries..."
 cp "$BUNDLE" "$PKGDIR/usr/bin/deepcool-desktop"
 chmod 755 "$PKGDIR/usr/bin/deepcool-desktop"
+cp "$DAEMON_BINARY" "$PKGDIR/usr/bin/deepcool-digital-dart"
+chmod 755 "$PKGDIR/usr/bin/deepcool-digital-dart"
 
 echo "Installing desktop file and icon..."
 if [ -f "$REPO_ROOT/desktop/com.rgs.deepcool_linux.desktop" ]; then
@@ -54,7 +67,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: Your Name <you@example.com>
-Depends: libc6 (>= 2.17), libhidapi0
+Depends: libc6 (>= 2.17), libhidapi-hidraw0 | libhidapi-libusb0
 Description: DeepCool Desktop GUI for CH170 devices
  A GTK desktop application to control and display DeepCool device information.
 EOF
@@ -64,10 +77,6 @@ cat > "$PKGDIR/DEBIAN/postinst" <<'EOP'
 set -e
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  # Try to enable the system service if present
-  if [ -f /etc/systemd/system/deepcool-digital-dart.service ]; then
-    systemctl enable --now deepcool-digital-dart.service || true
-  fi
 fi
 if command -v udevadm >/dev/null 2>&1; then
   udevadm control --reload || true

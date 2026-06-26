@@ -1,4 +1,8 @@
 post_install() {
+  if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || udevadm control --reload || true
+    udevadm trigger || true
+  fi
   if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
   fi

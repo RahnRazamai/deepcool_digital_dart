@@ -1,68 +1,105 @@
 # DeepCool Digital Dart
 
-A Linux-first GUI app for the DeepCool CH170 DIGITAL case display.
+Linux desktop app for DeepCool Digital displays.
 
-This repository contains:
+Supported models:
 
-- `flutter_desktop/`: Flutter Linux desktop app and packaging helpers.
-- `lib/` and `bin/`: shared Dart library code and a CLI entrypoint.
-- `packaging/`: AppImage, Debian, and Arch packaging support.
+- Air coolers: **AG300 DIGITAL**, **AG400 DIGITAL**, **AG500 DIGITAL**,
+  **AG620 DIGITAL**, **AK400 DIGITAL**, **AK400 DIGITAL PRO**,
+  **AK400 G2 DIGITAL NYX**, **AK500 DIGITAL**, **AK500 DIGITAL PRO**,
+  **AK500 G2 DIGITAL NYX**, **AK500S DIGITAL**, **AK620 DIGITAL**,
+  **AK620 DIGITAL PRO**, **AK620 G2 DIGITAL NYX**,
+  **AK700 DIGITAL NYX**, **ASSASSIN IV VC VISION**
+- Liquid coolers: **LD240**, **LD360**, **LP240**, **LP360**, **LQ240**,
+  **LQ360**, **LS520 SE DIGITAL**, **LS720 SE DIGITAL**
+- Cases: **CH170 DIGITAL**, **CH270 DIGITAL**, **CH360 DIGITAL**,
+  **CH510 MESH DIGITAL**, **CH560 DIGITAL**, **CH690 DIGITAL**,
+  **MORPHEUS**
 
-This is an unofficial GPLv3 Dart port of `deepcool-digital-linux`.
-Upstream reference: https://github.com/Nortank12/deepcool-digital-linux
+Use it to choose what the display shows: CPU, GPU, or PSU mode. After you save
+a mode, the app can keep the display running in the background, even after you
+close the window.
 
-## GUI-first Quick Start
+Some devices only support CPU display modes. The app auto-detects the connected
+model and uses the right packet format for that hardware.
 
-The recommended way to use this project is with the desktop app in
-`flutter_desktop/`.
+This is an unofficial GPLv3 Dart port of
+[`deepcool-digital-linux`](https://github.com/Nortank12/deepcool-digital-linux).
+
+## Download
+
+Get the latest release from GitHub Releases.
+
+Choose the package for your distro:
+
+| System | Recommended download |
+| --- | --- |
+| Ubuntu / Debian | `.deb` |
+| Arch Linux | `.pkg.tar.zst` |
+| SteamOS | `.AppImage` |
+| Bazzite | `.AppImage` |
+| Other Linux | `.AppImage` |
+
+## Install
+
+### Ubuntu / Debian
 
 ```bash
-cd flutter_desktop
-flutter pub get
-flutter run -d linux
+sudo apt install ./deepcool-desktop_*.deb
 ```
 
-Build a release bundle for Linux:
+### Arch Linux
 
 ```bash
-cd flutter_desktop
-flutter build linux --release
+sudo pacman -U deepcool-desktop-*.pkg.tar.zst
 ```
 
-Run the built desktop app:
+### SteamOS / Bazzite / Other Linux
 
 ```bash
-cd flutter_desktop/build/linux/x64/release/bundle
-./deepcool_desktop_app
+chmod +x Deepcool-Digital-Linux*.AppImage
+./Deepcool-Digital-Linux*.AppImage
 ```
 
-## What the desktop app does
+On SteamOS, run it from Desktop Mode.
 
-- displays CPU and GPU telemetry
-- sends HID reports to DeepCool CH170 and compatible devices
-- lets you configure the daemon executable path
-- installs user/systemd autostart units
-- installs a udev rule for rootless HID device access
+## First Use
 
-For more details, see `flutter_desktop/README.md`.
+1. Open **Deepcool Digital Linux**.
+2. Pick **CPU**, **GPU**, or **PSU** from the left side.
+3. Click **Save ... view to display**.
+4. Turn on **Keep display running** at the top of the app.
+5. Approve the admin prompt if it appears.
+6. If the app installs device access, unplug and reconnect the display once.
 
-## Requirements
+After that, the saved display mode should keep running after you close the app
+and after you sign in again.
 
-- Linux
-- Flutter SDK for the desktop app
-- HIDAPI runtime library:
-  - Arch: `sudo pacman -S hidapi`
-  - Debian/Ubuntu: `sudo apt install libhidapi-hidraw0`
-  - Fedora: `sudo dnf install hidapi`
-- Root access, or a udev rule that allows your user to write to the DeepCool
-  HID raw device
+## How It Works
 
-NVIDIA GPU mode uses `libnvidia-ml.so` through Dart FFI when available. AMD
-and Intel GPU modes use Linux sysfs.
+The GUI is only for choosing the display mode.
 
-## Udev rule
+The **Keep display running** toggle starts a small background daemon that keeps
+sending updates to the display. That is why the screen can keep working without
+the app window being open.
 
-Install the sample rule from `packaging/udev/99-deepcool-digital.rules`:
+## Troubleshooting
+
+### The display stops when I close the app
+
+Turn on **Keep display running**. If you are running from source instead of an
+installed package, build the daemon first:
+
+```bash
+dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
+```
+
+### Linux is blocking access to the display
+
+Turn on **Keep display running** and approve the admin prompt. Then unplug and
+reconnect the display once.
+
+Manual fallback:
 
 ```bash
 sudo cp packaging/udev/99-deepcool-digital.rules /etc/udev/rules.d/
@@ -70,69 +107,54 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-## CLI fallback
+### The app says HIDAPI is missing
 
-If you prefer a headless tool instead of the GUI, the root `bin/` entrypoint
-uses the same shared package code.
-
-```bash
-cd /home/rahngamingstudio/development/deepcool_digital_dart
-dart run bin/deepcool_digital_dart.dart --help
-```
-
-Recommended CLI examples:
+Install HIDAPI for your distro:
 
 ```bash
-dart run bin/deepcool_digital_dart.dart --dry-run
-sudo dart run bin/deepcool_digital_dart.dart --mode cpu_freq
-sudo dart run bin/deepcool_digital_dart.dart --mode gpu
-sudo dart run bin/deepcool_digital_dart.dart --mode saved
-sudo dart run bin/deepcool_digital_dart.dart --mode auto
+# Ubuntu / Debian
+sudo apt install libhidapi-hidraw0
+
+# Arch
+sudo pacman -S hidapi
+
+# Fedora
+sudo dnf install hidapi
 ```
 
-## Optional native executable (Linux)
+## Development
 
-Dart uses `dart compile exe` to build a native executable on all platforms, including Linux. The output file does not need a `.exe` extension on Linux.
-
-Compile a standalone Linux executable from the root package:
+Run the app from source:
 
 ```bash
-dart compile exe bin/deepcool_digital_dart.dart -o deepcool-digital-dart
-sudo ./deepcool-digital-dart --mode cpu_freq
+cd flutter_desktop
+flutter pub get
+flutter run -d linux
 ```
 
-## Systemd service example
-
-After installing the binary somewhere stable, create
-`/etc/systemd/system/deepcool-digital-dart.service`:
-
-```ini
-[Unit]
-Description=DeepCool Digital Dart CH170
-After=multi-user.target
-
-[Service]
-ExecStart=/home/rahngamingstudio/development/deepcool_digital_dart/deepcool-digital-dart --mode saved
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable it:
+Build release binaries:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now deepcool-digital-dart
+cd flutter_desktop
+flutter build linux --release
+cd ..
+dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 ```
 
-## Development checks
+Useful checks:
 
 ```bash
 dart format .
-dart analyze
-dart run bin/deepcool_digital_dart.dart --dry-run
+dart analyze lib bin
+flutter analyze
+flutter test
 ```
+
+## Project Layout
+
+- `flutter_desktop/` - Flutter desktop app
+- `lib/` and `bin/` - shared Dart library and CLI daemon
+- `packaging/` - AppImage, Debian, and Arch packaging
 
 ## License
 

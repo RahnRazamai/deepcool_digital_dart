@@ -10,6 +10,7 @@ source "$SCRIPT_DIR/../icon-utils.sh"
 
 BUILD_DIR="$SCRIPT_DIR/appdir"
 BUNDLE_SRC="$REPO_ROOT/flutter_desktop/build/linux/x64/release/bundle"
+DAEMON_BINARY="$REPO_ROOT/build/deepcool-digital-dart"
 
 rm -rf "$BUILD_DIR"
 
@@ -27,10 +28,25 @@ if [ ! -f "$BUNDLE_SRC/deepcool_desktop_app" ]; then
   echo "cd flutter_desktop && flutter build linux --release"
   exit 1
 fi
+if [ ! -x "$DAEMON_BINARY" ]; then
+  if command -v dart >/dev/null 2>&1; then
+    echo "Compiling CLI daemon..."
+    (cd "$REPO_ROOT" && dart compile exe bin/deepcool_digital_dart.dart -o "$DAEMON_BINARY")
+  else
+    echo "ERROR: CLI daemon binary not found:"
+    echo "$DAEMON_BINARY"
+    echo
+    echo "Run this first:"
+    echo "dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart"
+    exit 1
+  fi
+fi
 
-echo "Copying Flutter binary..."
+echo "Copying application binaries..."
 cp "$BUNDLE_SRC/deepcool_desktop_app" "$BUILD_DIR/usr/bin/deepcool-desktop"
 chmod +x "$BUILD_DIR/usr/bin/deepcool-desktop"
+cp "$DAEMON_BINARY" "$BUILD_DIR/usr/bin/deepcool-digital-dart"
+chmod +x "$BUILD_DIR/usr/bin/deepcool-digital-dart"
 
 echo "Copying Flutter runtime libraries..."
 if [ -d "$BUNDLE_SRC/lib" ]; then
