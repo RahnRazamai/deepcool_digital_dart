@@ -274,9 +274,8 @@ class AppConfig {
         return AppConfig(
           daemonPath: m['daemonPath'] ?? '/usr/bin/deepcool-digital-dart',
           autostartUser: m['autostartUser'] ?? true,
-          displayMode: DisplayModeSymbols.parse(
-                m['displayMode']?.toString() ?? '',
-              ) ??
+          displayMode:
+              DisplayModeSymbols.parse(m['displayMode']?.toString() ?? '') ??
               DisplayMode.cpuFrequency,
         );
       }
@@ -618,8 +617,12 @@ class _MonitorPageState extends State<MonitorPage> {
                   Text('Temperature: ${temp > 0 ? '$temp °C' : 'N/A'}'),
                   Text('Power: ${power > 0 ? '$power W' : 'N/A'}'),
                   const SizedBox(height: 6),
-                  Text('Memory: ${_memUsed > 0 ? '${_memUsed ~/ 1024} / ${_memTotal ~/ 1024} MB' : 'N/A'}'),
-                  Text('Available: ${_memAvailable > 0 ? '${_memAvailable ~/ 1024} MB' : 'N/A'}'),
+                  Text(
+                    'Memory: ${_memUsed > 0 ? '${_memUsed ~/ 1024} / ${_memTotal ~/ 1024} MB' : 'N/A'}',
+                  ),
+                  Text(
+                    'Available: ${_memAvailable > 0 ? '${_memAvailable ~/ 1024} MB' : 'N/A'}',
+                  ),
                   Text('Memory Usage: $_memUsagePercent%'),
                   const SizedBox(height: 6),
                   Text('CPU Usage: $_usagePercent%'),
