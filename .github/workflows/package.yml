@@ -124,9 +124,6 @@ jobs:
           find "$ARCHDIR/$PKGNAME-$PKGVER" -maxdepth 3 -type f | sort | head -80
 
           tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
-          m -rf "$ARCHDIR/$PKGNAME-$PKGVER"
-
-          tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
           rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"
 
       - name: Build Arch package (in Arch container)
