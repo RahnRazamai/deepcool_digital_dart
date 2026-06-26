@@ -12,6 +12,9 @@ const String deepCoolUdevRules = '''
 # udev rules for DeepCool Digital HID devices
 KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="3633", MODE:="0666", TAG+="uaccess"
 KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="34d3", ATTRS{idProduct}=="1100", MODE:="0666", TAG+="uaccess"
+
+# Let the desktop app read CPU package power from Linux powercap/RAPL.
+SUBSYSTEM=="powercap", KERNEL=="*-rapl:*", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj", RUN+="/bin/chmod a+r /sys/class/powercap/%k/max_energy_range_uj"
 ''';
 
 void main() {
@@ -33,6 +36,7 @@ Future<String> sendStatusPacket({
       target: target,
       cpu: cpu,
       gpu: gpu,
+      psu: PsuMonitor(),
       mode: mode,
       update: const Duration(milliseconds: 100),
       fahrenheit: false,
@@ -67,6 +71,7 @@ class DisplayUpdater {
   DisplayMode? _mode;
   CpuMonitor? _cpu;
   GpuMonitor? _gpu;
+  PsuMonitor? _psu;
   DeepCoolDeviceTarget? _target;
   HidApi? _api;
   HidDevice? _device;
@@ -83,6 +88,7 @@ class DisplayUpdater {
     _device = null;
     _api = null;
     _target = null;
+    _psu = null;
   }
 
   Future<void> _stopLoop() async {
@@ -104,10 +110,12 @@ class DisplayUpdater {
     final mode = _mode;
     final cpu = _cpu;
     final gpu = _gpu;
+    final psu = _psu;
     final target = _target;
     if (mode == null ||
         cpu == null ||
         gpu == null ||
+        psu == null ||
         target == null ||
         _device == null) {
       return;
@@ -119,6 +127,7 @@ class DisplayUpdater {
           target: target,
           cpu: cpu,
           gpu: gpu,
+          psu: psu,
           mode: mode,
           update: const Duration(milliseconds: 100),
           fahrenheit: false,
@@ -139,6 +148,7 @@ class DisplayUpdater {
     _mode = mode;
     _cpu = cpu;
     _gpu = gpu;
+    _psu = PsuMonitor();
 
     HidApi? api;
     HidDevice? device;
@@ -150,6 +160,7 @@ class DisplayUpdater {
         target: target,
         cpu: cpu,
         gpu: gpu,
+        psu: _psu,
         mode: mode,
         update: const Duration(milliseconds: 100),
         fahrenheit: false,
@@ -190,6 +201,7 @@ Future<String> applyDisplayMode({
   required CpuMonitor cpu,
   required GpuMonitor gpu,
 }) async {
+  await DisplayUpdater.instance.stop();
   await saveDisplayMode(mode);
   final backgroundError = await startSavedDisplayDaemon();
   if (backgroundError == null) {
@@ -197,6 +209,7 @@ Future<String> applyDisplayMode({
   }
 
   try {
+    await UserAutostartService.stopRunning();
     await DisplayUpdater.instance.apply(mode, cpu, gpu);
     return 'Saved ${displayModeLabel(mode)} display. It will keep updating while this app stays open. $backgroundError';
   } on Object catch (e) {
@@ -226,13 +239,15 @@ Future<String?> startSavedDisplayDaemon() async {
   }
 
   try {
+    await ensurePersistentDisplayReady();
+    await DisplayUpdater.instance.stop();
     await UserAutostartService.start(
       daemonPath: daemonPath,
       enableOnLogin: true,
     );
-    await DisplayUpdater.instance.stop();
     return null;
   } on Object catch (e) {
+    await UserAutostartService.stopRunning();
     return 'Could not start the background daemon: $e';
   }
 }
@@ -347,11 +362,11 @@ class _MainShellState extends State<MainShell> {
             labelType: NavigationRailLabelType.selected,
             destinations: const [
               NavigationRailDestination(
-                icon: Icon(Icons.monitor),
+                icon: Icon(Icons.memory),
                 label: Text('CPU'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.graphic_eq),
+                icon: Icon(Icons.developer_board),
                 label: Text('GPU'),
               ),
               NavigationRailDestination(
@@ -395,6 +410,107 @@ String displayModeLabel(DisplayMode mode) {
     DisplayMode.psu => 'PSU',
     DisplayMode.auto => 'Auto',
   };
+}
+
+class _HardwareIcon extends StatelessWidget {
+  const _HardwareIcon({required this.icon, required this.color});
+
+  final IconData icon;
+  final Color color;
+
+  static const double _size = 48;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Icon(icon, size: _size * 0.58, color: color),
+    );
+  }
+}
+
+class _VendorLogoBadge extends StatelessWidget {
+  const _VendorLogoBadge({
+    required this.label,
+    required this.backgroundColor,
+    required this.foregroundColor,
+  });
+
+  final String label;
+  final Color backgroundColor;
+  final Color foregroundColor;
+
+  factory _VendorLogoBadge.cpu(CpuVendor vendor) {
+    return switch (vendor) {
+      CpuVendor.amd => const _VendorLogoBadge(
+        label: 'AMD',
+        backgroundColor: Color(0xFFED1C24),
+        foregroundColor: Colors.white,
+      ),
+      CpuVendor.intel => const _VendorLogoBadge(
+        label: 'intel',
+        backgroundColor: Color(0xFF0071C5),
+        foregroundColor: Colors.white,
+      ),
+      CpuVendor.unknown => const _VendorLogoBadge(
+        label: 'CPU',
+        backgroundColor: Color(0xFF424242),
+        foregroundColor: Colors.white70,
+      ),
+    };
+  }
+
+  factory _VendorLogoBadge.gpu(GpuVendor? vendor) {
+    return switch (vendor) {
+      GpuVendor.amd => const _VendorLogoBadge(
+        label: 'AMD',
+        backgroundColor: Color(0xFFED1C24),
+        foregroundColor: Colors.white,
+      ),
+      GpuVendor.intel => const _VendorLogoBadge(
+        label: 'intel',
+        backgroundColor: Color(0xFF0071C5),
+        foregroundColor: Colors.white,
+      ),
+      GpuVendor.nvidia => const _VendorLogoBadge(
+        label: 'NVIDIA',
+        backgroundColor: Color(0xFF76B900),
+        foregroundColor: Colors.black,
+      ),
+      null => const _VendorLogoBadge(
+        label: 'GPU',
+        backgroundColor: Color(0xFF424242),
+        foregroundColor: Colors.white70,
+      ),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: foregroundColor,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 0,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 String buildSavedModeServiceUnit({
@@ -490,7 +606,13 @@ class UserAutostartService {
     if (enableOnLogin) {
       await _systemctlUser(['enable', serviceName]);
     }
-    await _systemctlUser(['restart', serviceName]);
+    await stopRunning();
+    await _systemctlUser(['start', serviceName]);
+  }
+
+  static Future<void> stopRunning() async {
+    if (!Platform.isLinux) return;
+    await Process.run('systemctl', ['--user', 'stop', serviceName]);
   }
 
   static Future<void> _disable() async {
@@ -587,36 +709,89 @@ Future<bool> isDeviceAccessRuleInstalled() async {
     final text = await ruleFile.readAsString();
     return text.contains('ATTRS{idVendor}=="3633"') &&
         text.contains('ATTRS{idVendor}=="34d3"') &&
-        text.contains('ATTRS{idProduct}=="1100"');
+        text.contains('ATTRS{idProduct}=="1100"') &&
+        text.contains('SUBSYSTEM=="powercap"');
   } on Object {
     return false;
   }
 }
 
-Future<String?> ensureDeviceAccessRuleInstalled() async {
-  if (!Platform.isLinux || await isDeviceAccessRuleInstalled()) {
+Future<bool> isLegacySystemServicePresent() async {
+  if (!Platform.isLinux) return false;
+
+  final legacyEtcUnit = File(
+    '/etc/systemd/system/${UserAutostartService.serviceName}',
+  );
+  if (await legacyEtcUnit.exists()) return true;
+
+  return await _systemServiceCheck('is-active') ||
+      await _systemServiceCheck('is-enabled');
+}
+
+Future<bool> _systemServiceCheck(String command) async {
+  try {
+    final result = await Process.run('systemctl', [
+      command,
+      UserAutostartService.serviceName,
+    ]);
+    return result.exitCode == 0;
+  } on Object {
+    return false;
+  }
+}
+
+Future<String?> ensurePersistentDisplayReady({bool installRules = true}) async {
+  if (!Platform.isLinux) {
     return null;
   }
 
-  final ruleFile = File(
-    '${Directory.systemTemp.path}/99-deepcool-digital.rules',
-  );
-  await ruleFile.writeAsString(deepCoolUdevRules);
+  final needsRule = installRules && !await isDeviceAccessRuleInstalled();
+  final needsLegacyCleanup = await isLegacySystemServicePresent();
+  if (!needsRule && !needsLegacyCleanup) {
+    return null;
+  }
+
+  File? ruleFile;
+  if (needsRule) {
+    ruleFile = File('${Directory.systemTemp.path}/99-deepcool-digital.rules');
+    await ruleFile.writeAsString(deepCoolUdevRules);
+  }
 
   final result = await _runPrivilegedScript('''
 set -e
-install -Dm644 ${_shellQuote(ruleFile.path)} /etc/udev/rules.d/99-deepcool-digital.rules
+${needsLegacyCleanup ? '''
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl disable --now ${UserAutostartService.serviceName} 2>/dev/null || true
+fi
+rm -f /etc/systemd/system/${UserAutostartService.serviceName}
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+fi
+''' : ''}
+${needsRule ? '''
+install -Dm644 ${_shellQuote(ruleFile!.path)} /etc/udev/rules.d/99-deepcool-digital.rules
 udevadm control --reload-rules || udevadm control --reload || true
 udevadm trigger || true
+find /sys/class/powercap -name energy_uj -exec chmod a+r {} + 2>/dev/null || true
+find /sys/class/powercap -name max_energy_range_uj -exec chmod a+r {} + 2>/dev/null || true
+''' : ''}
 ''');
 
   if (result.exitCode == 0) {
-    return 'Device access rule installed. Unplug and reconnect the display once.';
+    return [
+      if (needsLegacyCleanup)
+        'Old system service disabled so only one display writer runs.',
+      if (needsRule)
+        'Device access rule installed. Unplug and reconnect the display once.',
+    ].join(' ');
   }
 
-  throw StateError(
-    _adminActionMessage('Installing the device access rule', result),
-  );
+  final action = needsRule && needsLegacyCleanup
+      ? 'Setting up display access'
+      : needsLegacyCleanup
+      ? 'Disabling the old system service'
+      : 'Installing the device access rule';
+  throw StateError(_adminActionMessage(action, result));
 }
 
 class PersistentDisplayControl extends StatefulWidget {
@@ -685,7 +860,7 @@ class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
           });
           return;
         }
-        final accessMessage = await ensureDeviceAccessRuleInstalled();
+        final setupMessage = await ensurePersistentDisplayReady();
 
         await AppConfig(
           daemonPath: daemonPath,
@@ -700,7 +875,7 @@ class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
         setState(() {
           _enabled = true;
           _status =
-              '${accessMessage == null ? '' : '$accessMessage '}Enabled. ${displayModeLabel(cfg.displayMode)} will keep running after close and at login.';
+              '${setupMessage == null ? '' : '$setupMessage '}Enabled. ${displayModeLabel(cfg.displayMode)} will keep running after close and at login.';
         });
       } else {
         final cfg = await AppConfig.load();
@@ -713,9 +888,13 @@ class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
           enabled: false,
           daemonPath: cfg.daemonPath,
         );
+        final setupMessage = await ensurePersistentDisplayReady(
+          installRules: false,
+        );
         setState(() {
           _enabled = false;
-          _status = 'Disabled. Saved views update while the app is open.';
+          _status =
+              '${setupMessage == null ? '' : '$setupMessage '}Disabled. Saved views update while the app is open.';
         });
       }
     } on Object catch (e) {
@@ -796,6 +975,7 @@ class _MonitorPageState extends State<MonitorPage> {
   int _usagePercent = 0;
   int _cpuPowerWatts = 0;
   String _cpuName = 'Unknown CPU';
+  CpuVendor _cpuVendor = CpuVendor.unknown;
   int _memTotal = 0;
   int _memAvailable = 0;
   int _memUsed = 0;
@@ -856,6 +1036,7 @@ class _MonitorPageState extends State<MonitorPage> {
   void initState() {
     super.initState();
     _cpuName = CpuMonitor.cpuName() ?? 'Unknown CPU';
+    _cpuVendor = CpuMonitor.cpuVendor();
     _prevSample = _monitor.readUsageSample();
     if (_monitor.hasRapl) {
       _prevEnergy = _monitor.readEnergyMicrojoules();
@@ -909,6 +1090,7 @@ class _MonitorPageState extends State<MonitorPage> {
     final freq = _monitor.frequencyMhz();
     final temp = _monitor.temperature(fahrenheit: false);
     final power = _cpuPowerWatts;
+    final powerWarning = power > 0 ? null : _monitor.powerWarning;
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -921,16 +1103,40 @@ class _MonitorPageState extends State<MonitorPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'CPU Status',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  Row(
+                    children: [
+                      const _HardwareIcon(
+                        icon: Icons.memory,
+                        color: Colors.tealAccent,
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'CPU Status',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      _VendorLogoBadge.cpu(_cpuVendor),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   Text('Model: $_cpuName'),
+                  Text('Vendor: ${_cpuVendor.label}'),
                   const SizedBox(height: 6),
                   Text('Frequency: ${freq > 0 ? '$freq MHz' : 'N/A'}'),
                   Text('Temperature: ${temp > 0 ? '$temp °C' : 'N/A'}'),
                   Text('Power: ${power > 0 ? '$power W' : 'N/A'}'),
+                  if (powerWarning != null)
+                    Text(
+                      powerWarning,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
                   const SizedBox(height: 6),
                   Text(
                     'Memory: ${_memUsed > 0 ? '${_memUsed ~/ 1024} / ${_memTotal ~/ 1024} MB' : 'N/A'}',
@@ -1117,6 +1323,7 @@ class _GpuPageState extends State<GpuPage> {
   @override
   Widget build(BuildContext context) {
     final selectedName = _selectedGpu?.name ?? 'No GPU detected';
+    final selectedVendor = _monitor?.vendor ?? _selectedGpu?.vendor;
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -1160,50 +1367,64 @@ class _GpuPageState extends State<GpuPage> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _label,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const _HardwareIcon(
+                              icon: Icons.developer_board,
+                              color: Colors.orangeAccent,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _label,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            _VendorLogoBadge.gpu(selectedVendor),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text('Usage: $_usagePercent%'),
-                      Text(
-                        'Freq: ${_gpuFrequency > 0 ? '$_gpuFrequency MHz' : 'N/A'}',
-                      ),
-                      Text(
-                        'Temp: ${_gpuTemperature != null ? '$_gpuTemperature °C' : 'N/A'}',
-                      ),
-                      Text(
-                        'Power: ${_gpuPowerWatts > 0 ? '$_gpuPowerWatts W' : 'N/A'}',
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Save this page as the active GPU display view on the DeepCool screen.',
-                        style: TextStyle(fontSize: 12, color: Colors.white70),
-                      ),
-                      const SizedBox(height: 8),
-                      ElevatedButton.icon(
-                        onPressed: _isSending ? null : _sendGpuStatus,
-                        icon: const Icon(Icons.save),
-                        label: Text(
-                          _isSending ? 'Saving...' : 'Save GPU view to display',
-                        ),
-                      ),
-                      if (_sendStatus.isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        Text(_sendStatus),
+                        Text('Vendor: ${selectedVendor?.label ?? 'Unknown'}'),
+                        Text('Usage: $_usagePercent%'),
+                        Text(
+                          'Freq: ${_gpuFrequency > 0 ? '$_gpuFrequency MHz' : 'N/A'}',
+                        ),
+                        Text(
+                          'Temp: ${_gpuTemperature != null ? '$_gpuTemperature °C' : 'N/A'}',
+                        ),
+                        Text(
+                          'Power: ${_gpuPowerWatts > 0 ? '$_gpuPowerWatts W' : 'N/A'}',
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Save this page as the active GPU display view on the DeepCool screen.',
+                          style: TextStyle(fontSize: 12, color: Colors.white70),
+                        ),
+                        const SizedBox(height: 8),
+                        ElevatedButton.icon(
+                          onPressed: _isSending ? null : _sendGpuStatus,
+                          icon: const Icon(Icons.save),
+                          label: Text(
+                            _isSending
+                                ? 'Saving...'
+                                : 'Save GPU view to display',
+                          ),
+                        ),
+                        if (_sendStatus.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(_sendStatus),
+                        ],
                       ],
-                    ],
-                  ),
-                  const Icon(
-                    Icons.graphic_eq,
-                    size: 48,
-                    color: Colors.orangeAccent,
+                    ),
                   ),
                 ],
               ),
@@ -1256,8 +1477,73 @@ class PsuPage extends StatefulWidget {
 }
 
 class _PsuPageState extends State<PsuPage> {
+  final PsuMonitor _monitor = PsuMonitor();
+  final CpuMonitor _cpuMonitor = CpuMonitor();
+  final GpuMonitor _gpuMonitor = _defaultGpuMonitor();
   bool _isSending = false;
   String _sendStatus = '';
+  int _powerWatts = 0;
+  int _cpuPowerWatts = 0;
+  int _gpuPowerWatts = 0;
+  int _temperature = 0;
+  int _fanRpm = 0;
+  int _usagePercent = 0;
+  bool _isEstimatedPower = false;
+  String _powerSource = 'Unavailable';
+  int? _prevCpuEnergy;
+  CpuSample? _prevCpuSample;
+  DateTime? _prevCpuEnergyReadTime;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _tick() {
+    final actualPower = _monitor.powerWatts();
+    final now = DateTime.now();
+    final previousReadTime = _prevCpuEnergyReadTime;
+    final estimatedPower = estimateSystemPower(
+      cpu: _cpuMonitor,
+      gpu: _gpuMonitor,
+      elapsed: previousReadTime == null
+          ? const Duration(seconds: 1)
+          : now.difference(previousReadTime),
+      initialCpuEnergy: _prevCpuEnergy,
+      initialCpuSample: _prevCpuSample,
+    );
+    _prevCpuEnergy = _cpuMonitor.readEnergyMicrojoules();
+    _prevCpuSample = _cpuMonitor.readUsageSample();
+    _prevCpuEnergyReadTime = now;
+
+    final useEstimate = actualPower <= 0 && estimatedPower.totalWatts > 0;
+
+    setState(() {
+      _powerWatts = actualPower > 0 ? actualPower : estimatedPower.totalWatts;
+      _cpuPowerWatts = estimatedPower.cpuWatts;
+      _gpuPowerWatts = estimatedPower.gpuWatts;
+      _temperature = _monitor.temperature(fahrenheit: false);
+      _fanRpm = _monitor.fanRpm();
+      _usagePercent = _monitor.usagePercent();
+      _isEstimatedPower = useEstimate;
+      _powerSource = actualPower > 0
+          ? 'PSU sensor'
+          : (useEstimate
+                ? estimatedPower.usedHeuristic
+                      ? 'Estimated from CPU + GPU activity'
+                      : 'Estimated from CPU + GPU power sensors'
+                : 'Unavailable');
+    });
+  }
 
   Future<void> _sendPsuStatus() async {
     setState(() {
@@ -1289,21 +1575,54 @@ class _PsuPageState extends State<PsuPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'PSU Display Mode',
+                    'PSU Status',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Use this button to save PSU mode as the active DeepCool display setting.',
-                  ),
+                  Text('Sensor: ${_monitor.label}'),
+                  if (_monitor.isAvailable || _isEstimatedPower) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Power: ${_powerWatts > 0 ? '$_powerWatts W${_isEstimatedPower ? ' estimated' : ''}' : 'N/A'}',
+                    ),
+                    Text(
+                      'Source: $_powerSource',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    Text(
+                      'Temperature: ${_temperature > 0 ? '$_temperature °C' : 'N/A'}',
+                    ),
+                    Text('Fan: ${_fanRpm > 0 ? '$_fanRpm RPM' : 'N/A'}'),
+                    Text(
+                      'Load: ${_usagePercent > 0 ? '$_usagePercent%' : 'N/A'}',
+                    ),
+                    if (_isEstimatedPower) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Estimate detail: CPU ${_cpuPowerWatts > 0 ? '$_cpuPowerWatts W' : 'N/A'} + GPU ${_gpuPowerWatts > 0 ? '$_gpuPowerWatts W' : 'N/A'}. Excludes motherboard, drives, fans, and PSU losses.',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ] else ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _monitor.warning ??
+                          'No PSU telemetry is available on this system.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   const Text(
                     'Save this page as the active PSU display view on the DeepCool screen.',
-                    style: TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Actual PSU metrics are not available on this system, but the device will remain in PSU display mode.',
                     style: TextStyle(fontSize: 12, color: Colors.white70),
                   ),
                   const SizedBox(height: 12),

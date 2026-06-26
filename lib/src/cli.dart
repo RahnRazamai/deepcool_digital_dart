@@ -10,6 +10,7 @@ import 'mode.dart';
 import 'monitor/cpu.dart';
 import 'monitor/gpu.dart';
 import 'monitor/gpu_pci.dart';
+import 'monitor/psu.dart';
 
 const String _version = '0.1.0';
 
@@ -112,9 +113,11 @@ Future<int> runCli(List<String> arguments) async {
       'Warning: CPU fan speed is not implemented yet; zeros are sent for fan RPM.',
     );
   }
-  if (mode == DisplayMode.psu) {
+  final psu = PsuMonitor();
+  if (mode == DisplayMode.psu && !psu.isAvailable) {
+    stderr.writeln('Warning: ${psu.warning}');
     stderr.writeln(
-      'Warning: PSU monitoring is not implemented yet; zeros are sent.',
+      'Warning: PSU power will fall back to a CPU + GPU estimate when possible.',
     );
   }
   if (mode == DisplayMode.auto) {
@@ -156,10 +159,15 @@ Future<int> runCli(List<String> arguments) async {
     stderr.writeln('Warning: ${gpu.warning}');
   }
 
+  if (mode == DisplayMode.psu) {
+    print('PSU MON.: ${psu.label}');
+  }
+
   final display = DeepCoolDisplay(
     target: target,
     cpu: cpu,
     gpu: gpu,
+    psu: psu,
     mode: mode,
     update: options.update,
     fahrenheit: options.fahrenheit,

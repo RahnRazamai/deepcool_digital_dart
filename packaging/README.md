@@ -6,5 +6,6 @@ This folder contains templates for creating distributable packages:
 - `arch/` - PKGBUILD for Arch Linux
 - `debian/` - Debian packaging skeleton
 
-Each template includes a systemd unit and udev rule example. Adjust `ExecStart`
-paths to point to the installed `deepcool-digital-dart` binary.
+Packages install the app, CLI daemon, desktop launcher, icon, and udev rule.
+Persistent display updates are managed by the app through a per-user systemd
+unit, so packages should not install or enable a system-wide daemon.

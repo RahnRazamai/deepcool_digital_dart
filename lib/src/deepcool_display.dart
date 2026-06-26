@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'ch170_display.dart';
@@ -8,20 +9,23 @@ import 'hidapi.dart';
 import 'mode.dart';
 import 'monitor/cpu.dart';
 import 'monitor/gpu.dart';
+import 'monitor/psu.dart';
 
 final class DeepCoolDisplay {
-  const DeepCoolDisplay({
+  DeepCoolDisplay({
     required this.target,
     required this.cpu,
     required this.gpu,
+    PsuMonitor? psu,
     required this.mode,
     required this.update,
     required this.fahrenheit,
-  });
+  }) : psu = psu ?? PsuMonitor();
 
   final DeepCoolDeviceTarget target;
   final CpuMonitor cpu;
   final GpuMonitor gpu;
+  final PsuMonitor psu;
   final DisplayMode mode;
   final Duration update;
   final bool fahrenheit;
@@ -40,13 +44,16 @@ final class DeepCoolDisplay {
       DeepCoolDeviceFamily.ak400Pro => _buildAk400Pro(),
       DeepCoolDeviceFamily.ak620Pro => _buildAk620Pro(),
       DeepCoolDeviceFamily.chSeries => _buildChSeries(resolved),
-      DeepCoolDeviceFamily.chSeriesGen2 => Ch170Display(
-        cpu: cpu,
-        gpu: gpu,
-        mode: resolved,
-        update: update,
-        fahrenheit: fahrenheit,
-      ).buildStatusPacket(resolved),
+      DeepCoolDeviceFamily.chSeriesGen2 =>
+        resolved == DisplayMode.psu
+            ? _buildChGen2Psu()
+            : Ch170Display(
+                cpu: cpu,
+                gpu: gpu,
+                mode: resolved,
+                update: update,
+                fahrenheit: fahrenheit,
+              ).buildStatusPacket(resolved),
       DeepCoolDeviceFamily.ch510 => _buildCh510(resolved),
       DeepCoolDeviceFamily.ldSeries => _buildLdSeries(),
       DeepCoolDeviceFamily.lpSeries => _buildLpSeries(resolved),
@@ -363,6 +370,45 @@ final class DeepCoolDisplay {
     data[15] = _clampPercent(cpu.usageSince(cpuSample));
     data[16] = _checksum(data, 1, 15);
     data[17] = 22;
+    return data;
+  }
+
+  Future<Uint8List> _buildChGen2Psu() async {
+    final data = Uint8List(64);
+    data[0] = 16;
+    data[1] = 104;
+    data[2] = 1;
+    data[3] = 6;
+    data[4] = 35;
+    data[5] = 1;
+    data[6] = DisplayMode.psu.chGen2Value;
+    data[9] = fahrenheit ? 1 : 0;
+
+    final energy = cpu.readEnergyMicrojoules();
+    final cpuSample = cpu.readUsageSample();
+    await Future<void>.delayed(update);
+
+    final actualPower = psu.powerWatts();
+    final estimatedPower = estimateSystemPower(
+      cpu: cpu,
+      gpu: gpu,
+      elapsed: update,
+      initialCpuEnergy: energy,
+      initialCpuSample: cpuSample,
+    );
+    final power = actualPower > 0 ? actualPower : estimatedPower.totalWatts;
+    _setUint16Be(data, 28, power);
+    _setFloat32Be(data, 30, psu.temperature(fahrenheit: fahrenheit).toDouble());
+    data[34] = _clampPercent(
+      actualPower > 0
+          ? psu.usagePercent()
+          : math.max(cpu.usageSince(cpuSample), gpu.usagePercent()),
+    );
+    _setUint16Be(data, 35, power);
+    _setUint16Be(data, 37, psu.fanRpm());
+
+    data[40] = _checksum(data, 1, 39);
+    data[41] = 22;
     return data;
   }
 

@@ -112,10 +112,6 @@ jobs:
             cp -r packaging/udev "$ARCHDIR/$PKGNAME-$PKGVER/udev"
           fi
 
-          if [ -d packaging/systemd ]; then
-            cp -r packaging/systemd "$ARCHDIR/$PKGNAME-$PKGVER/systemd"
-          fi
-
           test -f "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/deepcool_desktop_app"
           test -f "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/lib/libflutter_linux_gtk.so"
           test -d "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/data"

@@ -66,7 +66,7 @@ Exec=deepcool-desktop
 Type=Application
 Categories=Utility;
 Icon=com.rgs.deepcool_linux
-StartupWMClass=deepcool-desktop
+StartupWMClass=com.rgs.deepcool_linux
 DESKTOP_EOF
 
 echo "Installing app icon..."

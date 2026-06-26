@@ -44,3 +44,6 @@ dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 
 The top toggle starts a user-level background service with `--mode saved`, so
 the display keeps working after the GUI closes and after login.
+
+PSU power is real when Linux exposes a PSU hwmon sensor. Otherwise the app shows
+an estimated CPU + GPU power value when those sensors are readable.

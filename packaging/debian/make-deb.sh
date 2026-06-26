@@ -21,7 +21,6 @@ mkdir -p "$PKGDIR/usr/bin"
 mkdir -p "$PKGDIR/usr/share/applications"
 mkdir -p "$PKGDIR/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "$PKGDIR/etc/udev/rules.d"
-mkdir -p "$PKGDIR/etc/systemd/system"
 mkdir -p "$PKGDIR/usr/share/doc/$PKGNAME"
 
 if [ ! -f "$BUNDLE" ]; then
@@ -52,12 +51,9 @@ if [ -f "$REPO_ROOT/desktop/com.rgs.deepcool_linux.desktop" ]; then
 fi
 install_256_icon "$PROJECT_ROOT" "$PKGDIR/usr/share/icons/hicolor/256x256/apps/com.rgs.deepcool_linux.png"
 
-echo "Including udev rule and systemd unit..."
+echo "Including udev rule..."
 if [ -f "$REPO_ROOT/udev/99-deepcool-digital.rules" ]; then
   cp "$REPO_ROOT/udev/99-deepcool-digital.rules" "$PKGDIR/etc/udev/rules.d/99-deepcool-digital.rules"
-fi
-if [ -f "$REPO_ROOT/systemd/deepcool-digital-dart.service" ]; then
-  cp "$REPO_ROOT/systemd/deepcool-digital-dart.service" "$PKGDIR/etc/systemd/system/deepcool-digital-dart.service"
 fi
 
 cat > "$PKGDIR/DEBIAN/control" <<EOF
@@ -76,12 +72,16 @@ cat > "$PKGDIR/DEBIAN/postinst" <<'EOP'
 #!/bin/sh
 set -e
 if command -v systemctl >/dev/null 2>&1; then
+  systemctl disable --now deepcool-digital-dart.service 2>/dev/null || true
+  rm -f /etc/systemd/system/deepcool-digital-dart.service
   systemctl daemon-reload || true
 fi
 if command -v udevadm >/dev/null 2>&1; then
   udevadm control --reload || true
   udevadm trigger || true
 fi
+find /sys/class/powercap -name energy_uj -exec chmod a+r {} + 2>/dev/null || true
+find /sys/class/powercap -name max_energy_range_uj -exec chmod a+r {} + 2>/dev/null || true
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
   gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
 fi
