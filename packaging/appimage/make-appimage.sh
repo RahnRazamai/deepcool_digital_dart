@@ -8,11 +8,22 @@ APPNAME=Deepcool-Digital-Linux
 VERSION=0.1.0
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$REPO_ROOT/appimage/appdir"
-BIN_SRC="$REPO_ROOT/../flutter_desktop/build/linux/x64/release/bundle/deepcool_desktop_app"
+BUNDLE_SRC="$REPO_ROOT/../flutter_desktop/build/linux/x64/release/bundle"
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/usr/bin"
-cp "$BIN_SRC" "$BUILD_DIR/usr/bin/deepcool-desktop"
+mkdir -p "$BUILD_DIR/usr/lib"
+
+# Copy the binary
+cp "$BUNDLE_SRC/deepcool_desktop_app" "$BUILD_DIR/usr/bin/deepcool-desktop"
+
+# Copy Flutter runtime libraries and data
+if [ -d "$BUNDLE_SRC/lib" ]; then
+	cp -r "$BUNDLE_SRC/lib"/* "$BUILD_DIR/usr/lib/" || true
+fi
+if [ -d "$BUNDLE_SRC/data" ]; then
+	cp -r "$BUNDLE_SRC/data" "$BUILD_DIR/usr/share/deepcool_desktop_app/" || true
+fi
 
 # copy necessary libraries/data
 mkdir -p "$BUILD_DIR/usr/share/applications"
