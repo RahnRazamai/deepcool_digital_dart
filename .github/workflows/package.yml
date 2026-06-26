@@ -31,7 +31,10 @@ jobs:
         working-directory: flutter_desktop
 
       - name: Build CLI daemon
-        run: dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
+        run: |
+          mkdir -p build
+          dart pub get
+          dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 
       - name: Build .deb package
         run: |
