@@ -1,4 +1,3 @@
-cat > packaging/appimage/make-appimage.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -69,6 +68,8 @@ export VERSION
 export APPIMAGE_EXTRACT_AND_RUN=1
 export LD_LIBRARY_PATH="$BUILD_DIR/usr/lib:${LD_LIBRARY_PATH:-}"
 
+cd "$SCRIPT_DIR"
+
 linuxdeploy \
   --appdir "$BUILD_DIR" \
   -e "$BUILD_DIR/usr/bin/deepcool-desktop" \
@@ -77,6 +78,3 @@ linuxdeploy \
   --output appimage
 
 echo "AppImage created."
-EOF
-
-chmod +x packaging/appimage/make-appimage.sh

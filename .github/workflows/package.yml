@@ -64,8 +64,7 @@ jobs:
             VERSION="0.1.0"
           fi
 
-          bash make-appimage.sh "$VERSION"
-        working-directory: packaging/appimage
+          bash packaging/appimage/make-appimage.sh "$VERSION"
 
       - name: Prepare Arch source tarball
         run: |
