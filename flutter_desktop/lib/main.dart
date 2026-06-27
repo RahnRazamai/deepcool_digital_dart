@@ -2,11 +2,18 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:deepcool_digital_dart/deepcool_digital_dart.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final ValueNotifier<DisplayMode> _savedDisplayModeNotifier =
     ValueNotifier<DisplayMode>(DisplayMode.cpuFrequency);
+
+const String koFiSupportUrl = 'https://ko-fi.com/rahngamingstudio';
+const String gitHubSupportUrl =
+    'https://github.com/RahnRazamai/deepcool_digital_dart';
+const String koFiSupportAsset = 'assets/support_me_on_kofi_beige.png';
 
 const String deepCoolUdevRules = '''
 # udev rules for DeepCool Digital HID devices
@@ -187,12 +194,7 @@ class DisplayUpdater {
 
 Future<void> saveDisplayMode(DisplayMode mode) async {
   final config = await AppConfig.load();
-  final updated = AppConfig(
-    daemonPath: config.daemonPath,
-    autostartUser: config.autostartUser,
-    displayMode: mode,
-  );
-  await updated.save();
+  await config.copyWith(displayMode: mode).save();
   _savedDisplayModeNotifier.value = mode;
 }
 
@@ -231,11 +233,8 @@ Future<String?> startSavedDisplayDaemon() async {
     return 'Background daemon is not installed. Install the packaged app, or run "dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart".';
   }
   if (daemonPath != cfg.daemonPath) {
-    await AppConfig(
-      daemonPath: daemonPath,
-      autostartUser: cfg.autostartUser,
-      displayMode: cfg.displayMode,
-    ).save();
+    final latest = await AppConfig.load();
+    await latest.copyWith(daemonPath: daemonPath).save();
   }
 
   try {
@@ -300,6 +299,13 @@ GpuMonitor _defaultGpuMonitor() {
   return GpuMonitor.fromPci(selectGpu(listPciGpus(), null));
 }
 
+Future<void> openSupportUrl(String url) async {
+  final uri = Uri.parse(url);
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    throw StateError('Could not open $url.');
+  }
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -315,6 +321,121 @@ class MyApp extends StatelessWidget {
   }
 }
 
+class SupportPromptDialog extends StatefulWidget {
+  const SupportPromptDialog({super.key, required this.initialDontShowAgain});
+
+  final bool initialDontShowAgain;
+
+  @override
+  State<SupportPromptDialog> createState() => _SupportPromptDialogState();
+}
+
+class _SupportPromptDialogState extends State<SupportPromptDialog> {
+  late bool _dontShowAgain;
+  late final TapGestureRecognizer _gitHubRecognizer;
+
+  @override
+  void initState() {
+    super.initState();
+    _dontShowAgain = widget.initialDontShowAgain;
+    _gitHubRecognizer = TapGestureRecognizer()
+      ..onTap = () => _open(gitHubSupportUrl);
+  }
+
+  @override
+  void dispose() {
+    _gitHubRecognizer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _open(String url) async {
+    try {
+      await openSupportUrl(url);
+    } on Object catch (e) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.favorite_border, color: theme.colorScheme.primary),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('Support DeepCool Digital Dart')),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text.rich(
+              TextSpan(
+                style: theme.textTheme.bodyMedium,
+                children: [
+                  const TextSpan(
+                    text:
+                        'If this app helps, you can support development or follow the project on ',
+                  ),
+                  TextSpan(
+                    text: 'GitHub',
+                    style: TextStyle(
+                      color: theme.colorScheme.primary,
+                      decoration: TextDecoration.underline,
+                      decorationColor: theme.colorScheme.primary,
+                    ),
+                    recognizer: _gitHubRecognizer,
+                  ),
+                  const TextSpan(text: '.'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Tooltip(
+              message: 'Open Ko-fi',
+              child: Semantics(
+                button: true,
+                label: 'Support me on Ko-fi',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => _open(koFiSupportUrl),
+                  child: Image.asset(
+                    koFiSupportAsset,
+                    height: 64,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _dontShowAgain,
+              onChanged: (value) {
+                setState(() => _dontShowAgain = value ?? false);
+              },
+              title: const Text("Don't show again"),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_dontShowAgain),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -324,11 +445,15 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  bool _supportPromptOpen = false;
 
   @override
   void initState() {
     super.initState();
     _applySavedDisplayMode();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showSupportPromptIfNeeded();
+    });
   }
 
   Future<void> _applySavedDisplayMode() async {
@@ -348,6 +473,37 @@ class _MainShellState extends State<MainShell> {
     } on Object {
       // Startup should not fail just because the device is unplugged or udev
       // permissions are not ready yet.
+    }
+  }
+
+  Future<void> _showSupportPromptIfNeeded() async {
+    final cfg = await AppConfig.load();
+    if (cfg.supportPromptDismissed) return;
+    await _showSupportPrompt(initialConfig: cfg);
+  }
+
+  Future<void> _openSupportPrompt() async {
+    await _showSupportPrompt();
+  }
+
+  Future<void> _showSupportPrompt({AppConfig? initialConfig}) async {
+    if (_supportPromptOpen) return;
+    _supportPromptOpen = true;
+    try {
+      final cfg = initialConfig ?? await AppConfig.load();
+      if (!mounted) return;
+      final dontShowAgain = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => SupportPromptDialog(
+          initialDontShowAgain: cfg.supportPromptDismissed,
+        ),
+      );
+      if (dontShowAgain == null) return;
+      final latest = await AppConfig.load();
+      await latest.copyWith(supportPromptDismissed: dontShowAgain).save();
+    } finally {
+      _supportPromptOpen = false;
     }
   }
 
@@ -379,7 +535,7 @@ class _MainShellState extends State<MainShell> {
           Expanded(
             child: Column(
               children: [
-                const PersistentDisplayControl(),
+                PersistentDisplayControl(onSupportPressed: _openSupportPrompt),
                 Expanded(
                   child: IndexedStack(
                     index: _index,
@@ -795,7 +951,9 @@ find /sys/class/powercap -name max_energy_range_uj -exec chmod a+r {} + 2>/dev/n
 }
 
 class PersistentDisplayControl extends StatefulWidget {
-  const PersistentDisplayControl({super.key});
+  const PersistentDisplayControl({super.key, required this.onSupportPressed});
+
+  final VoidCallback onSupportPressed;
 
   @override
   State<PersistentDisplayControl> createState() =>
@@ -862,11 +1020,7 @@ class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
         }
         final setupMessage = await ensurePersistentDisplayReady();
 
-        await AppConfig(
-          daemonPath: daemonPath,
-          autostartUser: true,
-          displayMode: cfg.displayMode,
-        ).save();
+        await cfg.copyWith(daemonPath: daemonPath, autostartUser: true).save();
         await UserAutostartService.start(
           daemonPath: daemonPath,
           enableOnLogin: true,
@@ -879,11 +1033,7 @@ class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
         });
       } else {
         final cfg = await AppConfig.load();
-        await AppConfig(
-          daemonPath: cfg.daemonPath,
-          autostartUser: false,
-          displayMode: cfg.displayMode,
-        ).save();
+        await cfg.copyWith(autostartUser: false).save();
         await UserAutostartService.setEnabled(
           enabled: false,
           daemonPath: cfg.daemonPath,
@@ -955,6 +1105,14 @@ class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
             ),
             const SizedBox(width: 12),
             Switch(value: _enabled, onChanged: _busy ? null : _setEnabled),
+            const SizedBox(width: 4),
+            Tooltip(
+              message: 'Support links',
+              child: IconButton(
+                onPressed: widget.onSupportPressed,
+                icon: const Icon(Icons.help_outline),
+              ),
+            ),
           ],
         ),
       ),
