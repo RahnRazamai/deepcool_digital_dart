@@ -8,18 +8,36 @@ final class AppConfig {
   final String daemonPath;
   final bool autostartUser;
   final DisplayMode displayMode;
+  final bool supportPromptDismissed;
 
   const AppConfig({
     required this.daemonPath,
     this.autostartUser = false,
     this.displayMode = DisplayMode.cpuFrequency,
+    this.supportPromptDismissed = false,
   });
 
   Map<String, dynamic> toJson() => {
     'daemonPath': daemonPath,
     'autostartUser': autostartUser,
     'displayMode': displayMode.symbol,
+    'supportPromptDismissed': supportPromptDismissed,
   };
+
+  AppConfig copyWith({
+    String? daemonPath,
+    bool? autostartUser,
+    DisplayMode? displayMode,
+    bool? supportPromptDismissed,
+  }) {
+    return AppConfig(
+      daemonPath: daemonPath ?? this.daemonPath,
+      autostartUser: autostartUser ?? this.autostartUser,
+      displayMode: displayMode ?? this.displayMode,
+      supportPromptDismissed:
+          supportPromptDismissed ?? this.supportPromptDismissed,
+    );
+  }
 
   static Future<AppConfig> load() async {
     final cfgFile = File('${_configDirPath()}/config.json');
@@ -33,6 +51,7 @@ final class AppConfig {
           displayMode:
               DisplayModeSymbols.parse(m['displayMode']?.toString() ?? '') ??
               DisplayMode.cpuFrequency,
+          supportPromptDismissed: m['supportPromptDismissed'] == true,
         );
       }
     } catch (_) {}

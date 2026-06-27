@@ -35,6 +35,23 @@ void main() {
     expect(unit, contains('WantedBy=default.target'));
   });
 
+  test('app config serializes support prompt dismissal', () {
+    const cfg = AppConfig(
+      daemonPath: '/usr/bin/deepcool-digital-dart',
+      supportPromptDismissed: true,
+    );
+
+    expect(cfg.toJson()['supportPromptDismissed'], isTrue);
+    expect(
+      cfg.copyWith(displayMode: DisplayMode.gpu).supportPromptDismissed,
+      isTrue,
+    );
+    expect(
+      cfg.copyWith(supportPromptDismissed: false).toJson(),
+      containsPair('supportPromptDismissed', false),
+    );
+  });
+
   test('CH Gen 2 PSU packet uses the supported PSU mode selector', () async {
     final target = DeepCoolDeviceTarget(
       supportedDeepCoolDevices.firstWhere(

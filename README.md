@@ -26,6 +26,14 @@ model and uses the right packet format for that hardware.
 This is an unofficial GPLv3 Dart port of
 [`deepcool-digital-linux`](https://github.com/Nortank12/deepcool-digital-linux).
 
+## Support
+
+If this app helps with your DeepCool Digital display, you can support or follow
+development here:
+
+- Ko-fi: <https://ko-fi.com/rahngamingstudio>
+- GitHub: <https://github.com/RahnRazamai/deepcool_digital_dart>
+
 ## Download
 
 Get the latest release from GitHub Releases.

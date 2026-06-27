@@ -173,12 +173,29 @@ jobs:
             exit 1
           fi
 
+          generated_notes_file="$(mktemp)"
+          release_notes_file="$(mktemp)"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" \
+            --jq '.body' > "$generated_notes_file"
+
+          {
+            cat "$generated_notes_file"
+            printf '\n\n'
+            awk '
+              /^## Support$/ { copy = 1 }
+              /^## Troubleshooting$/ { copy = 0 }
+              copy { print }
+            ' README.md
+          } > "$release_notes_file"
+
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Release already exists. Uploading assets with --clobber..."
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$release_notes_file"
           else
             echo "Creating release $GITHUB_REF_NAME..."
             gh release create "$GITHUB_REF_NAME" "${files[@]}" \
               --title "Release $GITHUB_REF_NAME" \
-              --generate-notes
+              --notes-file "$release_notes_file"
           fi
