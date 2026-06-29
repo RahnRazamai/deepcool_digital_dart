@@ -1,0 +1,101 @@
+name: Device support or detection request
+description: Request support for a DeepCool Digital device that is unsupported, misdetected, or uses the wrong packet format.
+title: "[Device]: "
+labels:
+  - device-support
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when the app does not detect your DeepCool Digital device, detects it as the wrong model, or the display output looks like the wrong hardware format.
+
+  - type: input
+    id: deepcool_model
+    attributes:
+      label: Which DeepCool Digital device are you using?
+      description: Include the exact marketing name and any suffixes such as DIGITAL, DIGITAL PRO, NYX, or VISION.
+      placeholder: "Example: AK400 G2 DIGITAL NYX, CH690 DIGITAL, ASSASSIN IV VC VISION"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device_family
+    attributes:
+      label: Device type
+      options:
+        - Air cooler
+        - Liquid cooler
+        - Case
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: usb_ids
+    attributes:
+      label: USB / HID identifiers
+      description: Paste output from `lsusb`, `deepcool-digital-dart --list`, or any tool that shows vendor and product IDs.
+      render: shell
+      placeholder: |
+        deepcool-digital-dart --list
+        lsusb
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What does the app do with this device?
+      placeholder: |
+        - The app does not detect it
+        - The app detects it as another model
+        - CPU mode works but GPU/PSU mode is wrong
+        - The display changes but values are garbled
+    validations:
+      required: true
+
+  - type: input
+    id: app_version
+    attributes:
+      label: App version
+      placeholder: "Example: v0.1.0, release package name, or git commit"
+    validations:
+      required: true
+
+  - type: input
+    id: linux_distro
+    attributes:
+      label: Linux distro and version
+      placeholder: "Example: Ubuntu 24.04, Arch Linux, SteamOS 3.7, Bazzite"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - .deb package
+        - Arch package
+        - AppImage
+        - Built from source
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: photos_or_references
+    attributes:
+      label: Product references
+      description: Links to the product page, photos of the display, or screenshots are helpful when a new model has a different layout.
+      placeholder: "Product page, photo, or screenshot links"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Follow-up testing
+      options:
+        - label: I can test a build or run commands if maintainers need more device data.
+          required: false

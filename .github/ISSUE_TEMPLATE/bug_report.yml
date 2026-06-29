@@ -1,0 +1,152 @@
+name: Bug report
+description: Report a problem with the DeepCool Digital Linux app, daemon, packaging, or display output.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve DeepCool Digital Dart. Hardware details matter a lot here, so please fill in as much as you can.
+
+  - type: input
+    id: deepcool_model
+    attributes:
+      label: Which DeepCool Digital device are you using?
+      description: Include the exact model printed on the product or box.
+      placeholder: "Example: AK620 DIGITAL, CH170 DIGITAL, LD360, CH560 DIGITAL"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device_family
+    attributes:
+      label: Device type
+      options:
+        - Air cooler
+        - Liquid cooler
+        - Case
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display_mode
+    attributes:
+      label: Display mode
+      description: Pick the mode that was active when the bug happened.
+      options:
+        - CPU
+        - GPU
+        - PSU
+        - Auto
+        - Keep display running / background daemon
+        - App startup / device detection
+        - Packaging / installation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Tell us what you saw and what you expected instead.
+      placeholder: "The display shows 0 W for PSU, but I expected..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest set of steps that makes the problem happen.
+      placeholder: |
+        1. Open Deepcool Digital Linux
+        2. Select GPU mode
+        3. Click Save GPU view to display
+        4. Turn on Keep display running
+    validations:
+      required: true
+
+  - type: input
+    id: app_version
+    attributes:
+      label: App version
+      description: Use the release version, package file name, git commit, or `deepcool-digital-dart --version`.
+      placeholder: "Example: v0.1.0, deepcool-desktop_0.1.0_amd64.deb, or commit abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - .deb package
+        - Arch package
+        - AppImage
+        - Built from source
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: linux_distro
+    attributes:
+      label: Linux distro and version
+      placeholder: "Example: Ubuntu 24.04, Arch Linux, SteamOS 3.7, Bazzite"
+    validations:
+      required: true
+
+  - type: input
+    id: desktop_environment
+    attributes:
+      label: Desktop environment
+      placeholder: "Example: KDE Plasma on Wayland, GNOME on X11, SteamOS Desktop Mode"
+    validations:
+      required: false
+
+  - type: textarea
+    id: system_hardware
+    attributes:
+      label: CPU, GPU, and PSU sensor details
+      description: Useful for CPU/GPU/PSU display bugs. Include CPU model, GPU model, PSU model, and whether Linux exposes the sensor.
+      placeholder: |
+        CPU: Ryzen 7 7800X3D
+        GPU: Radeon RX 7800 XT
+        PSU: DeepCool PX850G / no PSU telemetry exposed in Linux
+    validations:
+      required: false
+
+  - type: textarea
+    id: device_output
+    attributes:
+      label: Device detection output
+      description: If possible, paste the output from `deepcool-digital-dart --list`.
+      render: shell
+      placeholder: |
+        deepcool-digital-dart --list
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and terminal output
+      description: Paste app errors, daemon output, or relevant `systemctl --user status deepcool-digital-dart.service` output.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Quick checks
+      options:
+        - label: I unplugged and reconnected the DeepCool display after installing or updating udev rules.
+          required: false
+        - label: I checked that HIDAPI is installed for my distro.
+          required: false
+        - label: I checked for another old DeepCool service that might still be writing to the display.
+          required: false
