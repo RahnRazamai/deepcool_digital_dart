@@ -181,12 +181,66 @@ jobs:
 
           {
             cat "$generated_notes_file"
-            printf '\n\n'
-            awk '
-              /^## Support$/ { copy = 1 }
-              /^## Troubleshooting$/ { copy = 0 }
-              copy { print }
-            ' README.md
+            cat <<'RELEASE_NOTES'
+
+          ## Downloads
+
+          Choose the package for your distro from the release assets below.
+
+          | System | Recommended download |
+          | --- | --- |
+          | Ubuntu / Debian | `.deb` |
+          | Arch Linux | `.pkg.tar.zst` |
+          | SteamOS | `.AppImage` |
+          | Bazzite | `.AppImage` |
+          | Other Linux | `.AppImage` |
+
+          ## Install
+
+          Ubuntu / Debian:
+
+          ```bash
+          sudo apt install ./deepcool-desktop_*.deb
+          ```
+
+          Arch Linux:
+
+          ```bash
+          sudo pacman -U deepcool-desktop-*.pkg.tar.zst
+          ```
+
+          SteamOS / Bazzite / Other Linux:
+
+          ```bash
+          chmod +x Deepcool-Digital-Linux*.AppImage
+          ./Deepcool-Digital-Linux*.AppImage
+          ```
+
+          On SteamOS, run it from Desktop Mode.
+
+          ## After Installing
+
+          1. Open **Deepcool Digital Linux**.
+          2. Pick **CPU**, **GPU**, or **PSU** from the left side.
+          3. Click **Save ... view to display**.
+          4. Turn on **Keep display running** at the top of the app.
+          5. Approve the admin prompt if it appears.
+          6. If the app installs device access, unplug and reconnect the display once.
+
+          ## Notes
+
+          - PSU readings require Linux to expose a real PSU sensor through `hwmon`. If no PSU sensor is available, PSU mode can fall back to an estimated **CPU + GPU power** value when those sensors are readable.
+          - HIDAPI must be installed on the system. If the app says HIDAPI is missing, install your distro's `hidapi` package and reopen the app.
+          - If the display flickers between modes, an old DeepCool service may still be writing to the display. Turn **Keep display running** off and on once, or stop the old service manually.
+
+          ## Support
+
+          If this app helps with your DeepCool Digital display, you can support or follow development here:
+
+          - Ko-fi: <https://ko-fi.com/rahngamingstudio>
+          - GitHub: <https://github.com/RahnRazamai/deepcool_digital_dart>
+          - Issues: <https://github.com/RahnRazamai/deepcool_digital_dart/issues>
+          RELEASE_NOTES
           } > "$release_notes_file"
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
