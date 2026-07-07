@@ -7,4 +7,6 @@ export 'src/mode.dart';
 export 'src/monitor/cpu.dart';
 export 'src/monitor/gpu.dart';
 export 'src/monitor/gpu_pci.dart';
+export 'src/monitor/memory.dart';
 export 'src/monitor/psu.dart';
+export 'src/monitor/windows_sensors.dart';

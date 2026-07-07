@@ -1,5 +1,6 @@
 import 'dart:convert' as convert;
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:typed_data';
 
 typedef _MallocNative = Pointer<Void> Function(IntPtr size);
@@ -14,7 +15,7 @@ typedef _FreeDart = void Function(Pointer<Void> pointer);
 final class NativeMemory {
   NativeMemory._();
 
-  static final DynamicLibrary _libc = DynamicLibrary.open('libc.so.6');
+  static final DynamicLibrary _libc = _openStandardLibrary();
 
   static final _MallocDart _malloc = _libc
       .lookupFunction<_MallocNative, _MallocDart>('malloc');
@@ -49,5 +50,22 @@ final class NativeMemory {
     if (pointer != nullptr) {
       _free(pointer);
     }
+  }
+
+  static DynamicLibrary _openStandardLibrary() {
+    if (Platform.isWindows) {
+      for (final name in const ['ucrtbase.dll', 'msvcrt.dll']) {
+        try {
+          return DynamicLibrary.open(name);
+        } on Object {
+          continue;
+        }
+      }
+      throw StateError('Could not load the Windows C runtime.');
+    }
+    if (Platform.isMacOS) {
+      return DynamicLibrary.process();
+    }
+    return DynamicLibrary.open('libc.so.6');
   }
 }

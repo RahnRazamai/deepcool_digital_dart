@@ -2,6 +2,23 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Flutter Desktop Windows",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/flutter_desktop/lib/main.dart",
+      "cwd": "${workspaceFolder}/flutter_desktop",
+      "deviceId": "windows"
+    },
+    {
+      "name": "Flutter Desktop Windows (Release)",
+      "request": "launch",
+      "type": "dart",
+      "program": "${workspaceFolder}/flutter_desktop/lib/main.dart",
+      "cwd": "${workspaceFolder}/flutter_desktop",
+      "deviceId": "windows",
+      "flutterMode": "release"
+    },
+    {
       "name": "Flutter Desktop Linux",
       "request": "launch",
       "type": "dart",

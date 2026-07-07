@@ -1,3 +1,11 @@
 .dart_tool/
 build/
 deepcool-digital-dart
+packaging/out/
+tmp_flutter_windows_template/
+sensor_backend/bin/
+sensor_backend/obj/
+sensor_backend/lib/*.dll
+sensor_backend/lib/*.pdb
+sensor_backend/lib/*.xml
+sensor_backend/lib/*.config

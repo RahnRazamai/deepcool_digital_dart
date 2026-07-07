@@ -51,7 +51,20 @@ final class PciGpu {
   final String address;
   final String name;
 
-  bool get isDedicated => bus > 0;
+  bool get isDedicated {
+    if (Platform.isWindows) {
+      final normalized = name.toLowerCase();
+      return !normalized.contains('radeon graphics') &&
+          !normalized.contains('integrated') &&
+          !normalized.contains('uhd graphics') &&
+          !normalized.contains('iris xe') &&
+          !normalized.contains('610m') &&
+          !normalized.contains('780m') &&
+          !normalized.contains('890m');
+    }
+
+    return bus > 0;
+  }
 }
 
 GpuSelection? parseGpuSelection(String value) {
@@ -70,6 +83,10 @@ GpuSelection? parseGpuSelection(String value) {
 }
 
 List<PciGpu> listPciGpus() {
+  if (Platform.isWindows) {
+    return _listWindowsGpus();
+  }
+
   final root = Directory('/sys/bus/pci/devices');
   if (!root.existsSync()) {
     return const [];
@@ -207,4 +224,57 @@ String? _readPciDeviceName(String address) {
   } on ProcessException {
     return null;
   }
+}
+
+List<PciGpu> _listWindowsGpus() {
+  try {
+    final result = Process.runSync('powershell.exe', [
+      '-NoProfile',
+      '-Command',
+      r'Get-CimInstance Win32_VideoController | '
+          r'ForEach-Object { "$($_.Name)|$($_.PNPDeviceID)" }',
+    ]);
+    if (result.exitCode != 0) {
+      return const [];
+    }
+    final gpus = <PciGpu>[];
+    var bus = 1;
+    for (final line in result.stdout.toString().split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      final parts = trimmed.split('|');
+      final name = parts.first.trim();
+      final pnpId = parts.length > 1 ? parts.sublist(1).join('|').trim() : name;
+      final vendor = _vendorFromWindowsVideo(name, pnpId);
+      if (vendor == null) continue;
+      gpus.add(
+        PciGpu(
+          vendor: vendor,
+          bus: bus++,
+          address: pnpId.isEmpty ? name : pnpId,
+          name: name.isEmpty ? '${vendor.label} GPU' : name,
+        ),
+      );
+    }
+    return gpus;
+  } on ProcessException {
+    return const [];
+  }
+}
+
+GpuVendor? _vendorFromWindowsVideo(String name, String pnpId) {
+  final normalized = '$name $pnpId'.toLowerCase();
+  if (normalized.contains('ven_10de') || normalized.contains('nvidia')) {
+    return GpuVendor.nvidia;
+  }
+  if (normalized.contains('ven_1002') ||
+      normalized.contains('ven_1022') ||
+      normalized.contains('amd') ||
+      normalized.contains('radeon')) {
+    return GpuVendor.amd;
+  }
+  if (normalized.contains('ven_8086') || normalized.contains('intel')) {
+    return GpuVendor.intel;
+  }
+  return null;
 }

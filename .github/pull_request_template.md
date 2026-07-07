@@ -34,5 +34,5 @@ Commands run:
 
 ## Packaging and release notes
 
-- Package formats affected: .deb / Arch / AppImage / none
+- Package formats affected: Arch / Windows / none
 - User-facing release note:

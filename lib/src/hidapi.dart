@@ -1,5 +1,6 @@
 import 'dart:convert' as convert;
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'native_memory.dart';
@@ -133,12 +134,19 @@ final class HidApi {
   late final _HidCloseDart _close;
 
   static DynamicLibrary _openLibrary() {
-    const names = [
-      'libhidapi-hidraw.so.0',
-      'libhidapi-hidraw.so',
-      'libhidapi-libusb.so.0',
-      'libhidapi-libusb.so',
-    ];
+    final names = Platform.isWindows
+        ? const [
+            'hidapi.dll',
+            'hidapi-hidraw.dll',
+            'hidapi-libusb.dll',
+            'libhidapi.dll',
+          ]
+        : const [
+            'libhidapi-hidraw.so.0',
+            'libhidapi-hidraw.so',
+            'libhidapi-libusb.so.0',
+            'libhidapi-libusb.so',
+          ];
 
     final failures = <String>[];
     for (final name in names) {
@@ -150,7 +158,8 @@ final class HidApi {
     }
 
     throw HidException(
-      'Could not load HIDAPI. Install libhidapi-hidraw/libhidapi-libusb. '
+      'Could not load HIDAPI. '
+      '${Platform.isWindows ? 'Put hidapi.dll next to the app or in PATH.' : 'Install libhidapi-hidraw/libhidapi-libusb.'} '
       'Tried: ${failures.join('; ')}',
     );
   }
@@ -190,7 +199,8 @@ final class HidApi {
     if (handle == nullptr) {
       throw HidException(
         'Failed to open HID device VID=0x${vendorId.toRadixString(16)} '
-        'PID=0x${productId.toRadixString(16)}. Run as root or add a udev rule.',
+        'PID=0x${productId.toRadixString(16)}. '
+        '${Platform.isWindows ? 'Close other DeepCool display apps and try again.' : 'Run as root or add a udev rule.'}',
       );
     }
     return HidDevice._(handle, _write, _close);
@@ -237,6 +247,19 @@ final class HidDevice {
 String _wideString(Pointer<Int32> pointer) {
   if (pointer == nullptr) {
     return '';
+  }
+
+  if (Platform.isWindows) {
+    final windowsPointer = pointer.cast<Uint16>();
+    final units = <int>[];
+    for (var index = 0; index < 512; index++) {
+      final value = (windowsPointer + index).value;
+      if (value == 0) {
+        break;
+      }
+      units.add(value);
+    }
+    return String.fromCharCodes(units);
   }
 
   final units = <int>[];

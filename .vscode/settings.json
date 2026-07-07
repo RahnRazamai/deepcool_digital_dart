@@ -1,4 +1,4 @@
 {
   "dart.projectSearchDepth": 3,
-  "dart.flutterSdkPath": "${env:HOME}/flutter"
+  "dart.flutterSdkPath": "C:\\Users\\Rahn\\Development\\flutter"
 }

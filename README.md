@@ -1,6 +1,7 @@
 # DeepCool Digital Dart
 
-Linux desktop app for DeepCool Digital displays.
+Desktop app for DeepCool Digital displays. Linux is the most complete target;
+Windows support is available for HID display updates with limited telemetry.
 
 Supported models:
 
@@ -38,23 +39,14 @@ development here:
 
 Get the latest release from GitHub Releases.
 
-Choose the package for your distro:
+Choose the package for your system:
 
 | System | Recommended download |
 | --- | --- |
-| Ubuntu / Debian | `.deb` |
 | Arch Linux | `.pkg.tar.zst` |
-| SteamOS | `.AppImage` |
-| Bazzite | `.AppImage` |
-| Other Linux | `.AppImage` |
+| Windows | `.exe` installer or `.zip` |
 
 ## Install
-
-### Ubuntu / Debian
-
-```bash
-sudo apt install ./deepcool-desktop_*.deb
-```
 
 ### Arch Linux
 
@@ -62,18 +54,13 @@ sudo apt install ./deepcool-desktop_*.deb
 sudo pacman -U deepcool-desktop-*.pkg.tar.zst
 ```
 
-### SteamOS / Bazzite / Other Linux
+### Windows
 
-```bash
-chmod +x Deepcool-Digital-Linux*.AppImage
-./Deepcool-Digital-Linux*.AppImage
-```
-
-On SteamOS, run it from Desktop Mode.
+Download and run `DeepCoolDigitalDartSetup-*-windows-x64.exe`.
 
 ## First Use
 
-1. Open **Deepcool Digital Linux**.
+1. Open **DeepCool Digital Dart**.
 2. Pick **CPU**, **GPU**, or **PSU** from the left side.
 3. Click **Save ... view to display**.
 4. Turn on **Keep display running** at the top of the app.
@@ -138,15 +125,30 @@ sudo systemctl daemon-reload
 Install HIDAPI for your distro:
 
 ```bash
-# Ubuntu / Debian
-sudo apt install libhidapi-hidraw0
-
 # Arch
 sudo pacman -S hidapi
 
 # Fedora
 sudo dnf install hidapi
 ```
+
+On Windows, put `hidapi.dll` next to `deepcool_desktop_app.exe` and
+`deepcool-digital-dart.exe`, or put it in a directory listed in `PATH`.
+
+### Windows sensors show N/A
+
+Windows does not expose CPU/GPU/PSU hardware sensors through a Linux-style
+`hwmon` interface. Windows release builds include `deepcool-sensor-backend.exe`,
+a headless local backend built on LibreHardwareMonitorLib. It has no taskbar
+window or tray icon; the installer registers it as an elevated scheduled task so
+the app can read CPU/GPU/PSU sensors without repeated admin prompts.
+
+If you are running from source or using an incomplete package, make sure the
+backend executable and LibreHardwareMonitorLib DLLs are next to the Flutter app
+executable.
+
+PSU telemetry still depends on the PSU hardware. If the PSU does not expose its
+own sensors, the app estimates PSU power from readable CPU + GPU power.
 
 ## Development
 
@@ -158,6 +160,14 @@ flutter pub get
 flutter run -d linux
 ```
 
+On Windows:
+
+```powershell
+cd flutter_desktop
+flutter pub get
+flutter run -d windows
+```
+
 Build release binaries:
 
 ```bash
@@ -166,6 +176,26 @@ flutter build linux --release
 cd ..
 dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 ```
+
+On Windows:
+
+```powershell
+cd flutter_desktop
+flutter build windows --release
+cd ..
+dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart.exe
+```
+
+For a complete Windows release zip, run:
+
+```powershell
+.\packaging\windows\build-release.ps1
+```
+
+The Windows app expects the daemon executable, `deepcool-sensor-backend.exe`,
+and `hidapi.dll` to be available next to the app executable or in `PATH`. The
+**Keep display running** toggle uses a hidden launcher in the current user's
+Startup folder on Windows.
 
 Useful checks:
 
@@ -180,7 +210,7 @@ flutter test
 
 - `flutter_desktop/` - Flutter desktop app
 - `lib/` and `bin/` - shared Dart library and CLI daemon
-- `packaging/` - AppImage, Debian, and Arch packaging
+- `packaging/` - Arch Linux and Windows packaging
 
 ## License
 

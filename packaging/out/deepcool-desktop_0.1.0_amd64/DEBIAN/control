@@ -1,9 +1,0 @@
-Package: deepcool-desktop
-Version: 0.1.0
-Section: utils
-Priority: optional
-Architecture: amd64
-Maintainer: Your Name <you@example.com>
-Depends: libc6 (>= 2.17), libhidapi0
-Description: DeepCool Desktop GUI for CH170 devices
- A GTK desktop application to control and display DeepCool device information.

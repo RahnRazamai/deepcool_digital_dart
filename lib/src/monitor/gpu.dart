@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../native_memory.dart';
 import 'gpu_pci.dart';
+import 'windows_sensors.dart';
 
 abstract interface class GpuMonitor {
   factory GpuMonitor.fromPci(PciGpu? gpu) {
@@ -11,6 +12,9 @@ abstract interface class GpuMonitor {
     }
 
     try {
+      if (Platform.isWindows) {
+        return _WindowsGpu(gpu);
+      }
       return switch (gpu.vendor) {
         GpuVendor.amd => _AmdGpu(gpu),
         GpuVendor.intel => _IntelGpu(gpu),
@@ -384,20 +388,27 @@ typedef _NvmlGetClockDart =
     int Function(Pointer<Void> device, int clockType, Pointer<Uint32> clock);
 
 DynamicLibrary _openNvml() {
-  const paths = [
-    'libnvidia-ml.so',
-    'libnvidia-ml.so.1',
-    '/usr/lib/x86_64-linux-gnu/nvidia/current/libnvidia-ml.so',
-    '/usr/lib/x86_64-linux-gnu/nvidia/current/libnvidia-ml.so.1',
-    '/usr/lib/x86_64-linux-gnu/libnvidia-ml.so',
-    '/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1',
-    '/usr/lib/libnvidia-ml.so',
-    '/usr/lib/libnvidia-ml.so.1',
-    '/usr/lib64/libnvidia-ml.so',
-    '/usr/lib64/libnvidia-ml.so.1',
-    '/run/opengl-driver/lib/libnvidia-ml.so',
-    '/run/opengl-driver/lib/libnvidia-ml.so.1',
-  ];
+  final windowsSystemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+  final paths = Platform.isWindows
+      ? [
+          'nvml.dll',
+          r'C:\Program Files\NVIDIA Corporation\NVSMI\nvml.dll',
+          '$windowsSystemRoot\\System32\\nvml.dll',
+        ]
+      : const [
+          'libnvidia-ml.so',
+          'libnvidia-ml.so.1',
+          '/usr/lib/x86_64-linux-gnu/nvidia/current/libnvidia-ml.so',
+          '/usr/lib/x86_64-linux-gnu/nvidia/current/libnvidia-ml.so.1',
+          '/usr/lib/x86_64-linux-gnu/libnvidia-ml.so',
+          '/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1',
+          '/usr/lib/libnvidia-ml.so',
+          '/usr/lib/libnvidia-ml.so.1',
+          '/usr/lib64/libnvidia-ml.so',
+          '/usr/lib64/libnvidia-ml.so.1',
+          '/run/opengl-driver/lib/libnvidia-ml.so',
+          '/run/opengl-driver/lib/libnvidia-ml.so.1',
+        ];
 
   for (final path in paths) {
     try {
@@ -406,7 +417,64 @@ DynamicLibrary _openNvml() {
       continue;
     }
   }
-  throw StateError('libnvidia-ml.so was not found');
+  throw StateError(
+    Platform.isWindows
+        ? 'nvml.dll was not found'
+        : 'libnvidia-ml.so was not found',
+  );
+}
+
+final class _WindowsGpu implements GpuMonitor {
+  const _WindowsGpu(this._gpu);
+
+  final PciGpu _gpu;
+
+  @override
+  String get label => _gpu.name;
+
+  @override
+  GpuVendor get vendor => _gpu.vendor;
+
+  @override
+  String? get warning {
+    final snapshot = WindowsSensors.instance.snapshotForGpu(_gpu);
+    if (snapshot?.hasUsefulSensors == true) {
+      return null;
+    }
+    return 'GPU sensors are unavailable for ${_gpu.name}.';
+  }
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  int temperature({required bool fahrenheit}) {
+    final celsius = WindowsSensors.instance.snapshotForGpu(_gpu)?.temperature;
+    if (celsius == null) return 0;
+    final value = fahrenheit ? (celsius * 9 / 5) + 32 : celsius;
+    return _clampByte(value.round());
+  }
+
+  @override
+  int usagePercent() {
+    return _clampByte(
+      WindowsSensors.instance.snapshotForGpu(_gpu)?.load?.round() ?? 0,
+    );
+  }
+
+  @override
+  int powerWatts() {
+    return _clampWord(
+      WindowsSensors.instance.snapshotForGpu(_gpu)?.power?.round() ?? 0,
+    );
+  }
+
+  @override
+  int frequencyMhz() {
+    return _clampWord(
+      WindowsSensors.instance.snapshotForGpu(_gpu)?.clock?.round() ?? 0,
+    );
+  }
 }
 
 String? _findHwmonDir(String pciAddress, String expectedPrefix) {

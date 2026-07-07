@@ -63,10 +63,10 @@ body:
       required: true
 
   - type: input
-    id: linux_distro
+    id: operating_system
     attributes:
-      label: Linux distro and version
-      placeholder: "Example: Ubuntu 24.04, Arch Linux, SteamOS 3.7, Bazzite"
+      label: Operating system and version
+      placeholder: "Example: Arch Linux, Windows 11 24H2"
     validations:
       required: true
 
@@ -75,9 +75,9 @@ body:
     attributes:
       label: Install method
       options:
-        - .deb package
         - Arch package
-        - AppImage
+        - Windows installer
+        - Windows zip
         - Built from source
         - Other / not sure
     validations:

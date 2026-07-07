@@ -1,4 +1,4 @@
-# Deepcool Digital Linux
+# DeepCool Digital Desktop
 
 Flutter desktop app for DeepCool Digital displays.
 
@@ -15,10 +15,23 @@ flutter pub get
 flutter run -d linux
 ```
 
+On Windows:
+
+```powershell
+flutter pub get
+flutter run -d windows
+```
+
 ## Build
 
 ```bash
 flutter build linux --release
+```
+
+On Windows:
+
+```powershell
+flutter build windows --release
 ```
 
 The release bundle is written to:
@@ -35,6 +48,15 @@ cd ..
 dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 ```
 
+For Windows, compile the daemon with an `.exe` extension:
+
+```powershell
+cd ..
+dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart.exe
+```
+
+Put `hidapi.dll` next to the app executable and daemon, or in `PATH`.
+
 ## App Flow
 
 1. Save CPU, GPU, or PSU mode.
@@ -42,8 +64,9 @@ dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 3. Approve the admin prompt if device access needs to be installed.
 4. Unplug and reconnect the display once if the app installs device access.
 
-The top toggle starts a user-level background service with `--mode saved`, so
-the display keeps working after the GUI closes and after login.
+The top toggle starts a user-level background service with `--mode saved` on
+Linux, or a Startup-folder launcher on Windows, so the display keeps working
+after the GUI closes and after login.
 
 PSU power is real when Linux exposes a PSU hwmon sensor. Otherwise the app shows
 an estimated CPU + GPU power value when those sensors are readable.

@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'mode.dart';
 
-// Shared GUI/daemon config stored in the user's XDG config directory.
+// Shared GUI/daemon config stored in the user's platform config directory.
 final class AppConfig {
   final String daemonPath;
   final bool autostartUser;
@@ -46,7 +46,7 @@ final class AppConfig {
         final text = await cfgFile.readAsString();
         final m = jsonDecode(text) as Map<String, dynamic>;
         return AppConfig(
-          daemonPath: m['daemonPath'] ?? '/usr/bin/deepcool-digital-dart',
+          daemonPath: m['daemonPath'] ?? _defaultDaemonPath(),
           autostartUser: m['autostartUser'] ?? false,
           displayMode:
               DisplayModeSymbols.parse(m['displayMode']?.toString() ?? '') ??
@@ -55,7 +55,7 @@ final class AppConfig {
         );
       }
     } catch (_) {}
-    return const AppConfig(daemonPath: '/usr/bin/deepcool-digital-dart');
+    return AppConfig(daemonPath: _defaultDaemonPath());
   }
 
   Future<void> save() async {
@@ -67,6 +67,18 @@ final class AppConfig {
 }
 
 String _configDirPath() {
+  if (Platform.isWindows) {
+    final appData = Platform.environment['APPDATA'];
+    if (appData != null && appData.isNotEmpty) {
+      return '$appData\\deepcool-desktop';
+    }
+
+    final userProfile = Platform.environment['USERPROFILE'];
+    if (userProfile != null && userProfile.isNotEmpty) {
+      return '$userProfile\\AppData\\Roaming\\deepcool-desktop';
+    }
+  }
+
   final xdgConfigHome = Platform.environment['XDG_CONFIG_HOME'];
   if (xdgConfigHome != null && xdgConfigHome.isNotEmpty) {
     return '$xdgConfigHome/deepcool-desktop';
@@ -78,4 +90,10 @@ String _configDirPath() {
   }
 
   return '${Directory.current.path}/.config/deepcool-desktop';
+}
+
+String _defaultDaemonPath() {
+  return Platform.isWindows
+      ? '${Directory.current.path}\\build\\deepcool-digital-dart.exe'
+      : '/usr/bin/deepcool-digital-dart';
 }

@@ -3,16 +3,25 @@ import 'dart:math' as math;
 
 import 'cpu.dart';
 import 'gpu.dart';
+import 'windows_sensors.dart';
 
 final class PsuMonitor {
   PsuMonitor() : _hwmonDir = _findPsuHwmonDir();
 
   final String? _hwmonDir;
 
-  bool get isAvailable => _hwmonDir != null;
+  bool get isAvailable =>
+      _hwmonDir != null ||
+      (Platform.isWindows &&
+          (WindowsSensors.instance.snapshot.psuPower != null ||
+              WindowsSensors.instance.snapshot.psuTemperature != null ||
+              WindowsSensors.instance.snapshot.psuFan != null));
 
   String get label {
     final dir = _hwmonDir;
+    if (Platform.isWindows) {
+      return isAvailable ? 'Windows PSU sensor' : 'No PSU sensor detected';
+    }
     if (dir == null) {
       return 'No PSU sensor detected';
     }
@@ -20,6 +29,11 @@ final class PsuMonitor {
   }
 
   String? get warning {
+    if (Platform.isWindows) {
+      return isAvailable
+          ? null
+          : 'PSU sensors need LibreHardwareMonitor/OpenHardwareMonitor running and a PSU that exposes telemetry.';
+    }
     if (_hwmonDir == null) {
       return 'Linux did not expose PSU telemetry through hwmon.';
     }
@@ -27,6 +41,12 @@ final class PsuMonitor {
   }
 
   int powerWatts() {
+    if (Platform.isWindows) {
+      return _clampWord(
+        WindowsSensors.instance.snapshot.psuPower?.round() ?? 0,
+      );
+    }
+
     final dir = _hwmonDir;
     if (dir == null) return 0;
 
@@ -40,6 +60,13 @@ final class PsuMonitor {
   }
 
   int temperature({required bool fahrenheit}) {
+    if (Platform.isWindows) {
+      final celsius = WindowsSensors.instance.snapshot.psuTemperature;
+      if (celsius == null) return 0;
+      final value = fahrenheit ? (celsius * 9 / 5) + 32 : celsius;
+      return _clampByte(value.round());
+    }
+
     final dir = _hwmonDir;
     if (dir == null) return 0;
 
@@ -52,12 +79,20 @@ final class PsuMonitor {
   }
 
   int fanRpm() {
+    if (Platform.isWindows) {
+      return _clampWord(WindowsSensors.instance.snapshot.psuFan?.round() ?? 0);
+    }
+
     final dir = _hwmonDir;
     if (dir == null) return 0;
     return _clampWord(_firstReadableInt(dir, const ['fan1_input']) ?? 0);
   }
 
   int usagePercent() {
+    if (Platform.isWindows) {
+      return _clampByte(WindowsSensors.instance.snapshot.psuLoad?.round() ?? 0);
+    }
+
     final dir = _hwmonDir;
     if (dir == null) return 0;
 

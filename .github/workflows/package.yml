@@ -7,9 +7,10 @@ on:
 
 permissions:
   contents: write
-    
+
 jobs:
-  build-packages:
+  linux-arch:
+    name: Linux Arch package
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -20,10 +21,10 @@ jobs:
         with:
           flutter-version: '3.44.2'
 
-      - name: Install apt dependencies
+      - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libhidapi-dev libgtk-3-dev curl wget xz-utils imagemagick
+          sudo apt-get install -y libhidapi-dev libgtk-3-dev xz-utils
 
       - name: Get Flutter deps
         run: flutter pub get
@@ -39,42 +40,6 @@ jobs:
           dart pub get
           dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 
-      - name: Build .deb package
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="0.1.0"
-          fi
-
-          bash packaging/debian/make-deb.sh "$VERSION"
-
-      - name: Download linuxdeploy and appimagetool
-        run: |
-          curl -LO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -LO https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage || true
-          chmod +x linuxdeploy-*.AppImage || true
-          chmod +x appimagetool-*.AppImage || true
-          APPIMAGE_DIR="$(cd "$(pwd)" && pwd)"
-          printf '#!/bin/bash\nexec "%s/linuxdeploy-x86_64.AppImage" "$@"\n' "$APPIMAGE_DIR" > linuxdeploy
-          chmod +x linuxdeploy
-          sudo mv linuxdeploy /usr/local/bin/linuxdeploy
-          if [ -f appimagetool-x86_64.AppImage ]; then
-            printf '#!/bin/bash\nexec "%s/appimagetool-x86_64.AppImage" "$@"\n' "$APPIMAGE_DIR" > appimagetool
-            chmod +x appimagetool
-            sudo mv appimagetool /usr/local/bin/appimagetool
-          fi
-
-      - name: Build AppImage
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="0.1.0"
-          fi
-
-          bash packaging/appimage/make-appimage.sh "$VERSION"
-
       - name: Prepare Arch source tarball
         run: |
           set -euo pipefail
@@ -88,7 +53,6 @@ jobs:
             PKGVER="0.1.0"
           fi
 
-          # Update PKGBUILD version to match release tag
           sed -i "s/^pkgver=.*/pkgver=$PKGVER/" "$ARCHDIR/PKGBUILD"
           sed -i "s/^pkgrel=.*/pkgrel=1/" "$ARCHDIR/PKGBUILD"
 
@@ -100,34 +64,23 @@ jobs:
           test -d flutter_desktop/build/linux/x64/release/bundle/data
           test -x build/deepcool-digital-dart
 
-          # Copy FULL Flutter bundle
           mkdir -p "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle"
           cp -a flutter_desktop/build/linux/x64/release/bundle/. "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/"
-
-          # Copy CLI daemon
           install -Dm755 build/deepcool-digital-dart "$ARCHDIR/$PKGNAME-$PKGVER/build/deepcool-digital-dart"
 
-          # Copy packaging extras
           if [ -d packaging/udev ]; then
             cp -r packaging/udev "$ARCHDIR/$PKGNAME-$PKGVER/udev"
           fi
 
-          test -f "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/deepcool_desktop_app"
-          test -f "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/lib/libflutter_linux_gtk.so"
-          test -d "$ARCHDIR/$PKGNAME-$PKGVER/flutter-bundle/data"
-
-          echo "Arch source content:"
-          find "$ARCHDIR/$PKGNAME-$PKGVER" -maxdepth 3 -type f | sort | head -80
-
           tar -C "$ARCHDIR" -czf "$ARCHDIR/${PKGNAME}-${PKGVER}.tar.gz" "$PKGNAME-$PKGVER"
           rm -rf "$ARCHDIR/$PKGNAME-$PKGVER"
 
-      - name: Build Arch package (in Arch container)
+      - name: Build Arch package
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD":/work -w /work/packaging/arch archlinux:latest /bin/bash -lc '
             set -euo pipefail
-            pacman -Sy --noconfirm --needed base-devel wget git gtk3 hidapi
+            pacman -Sy --noconfirm --needed base-devel git gtk3 hidapi
             host_uid=$(stat -c "%u" /work)
             host_gid=$(stat -c "%g" /work)
             if ! getent group "$host_gid" >/dev/null; then
@@ -140,33 +93,99 @@ jobs:
             chown -R "$host_uid:$host_gid" /work/packaging/arch
             runuser -u builder -- makepkg -C --skipinteg --noconfirm
           '
-        env:
-          CI: true
 
-      - name: Upload artifacts
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: packages
+          name: linux-arch-package
           path: |
-            packaging/out/**/*.deb
-            packaging/appimage/*.AppImage
             packaging/arch/*.tar.gz
             packaging/arch/*.pkg.*
 
+  windows:
+    name: Windows package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Download LibreHardwareMonitor
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = Invoke-RestMethod https://api.github.com/repos/LibreHardwareMonitor/LibreHardwareMonitor/releases/latest
+          $asset = $release.assets |
+            Where-Object { $_.name -like "*.zip" -and $_.name -notlike "*source*" } |
+            Select-Object -First 1
+          if (-not $asset) {
+            throw "No LibreHardwareMonitor zip asset found in latest release."
+          }
+          New-Item -ItemType Directory -Force -Path build\lhm | Out-Null
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile build\lhm\LibreHardwareMonitor.zip
+          Expand-Archive build\lhm\LibreHardwareMonitor.zip -DestinationPath build\lhm -Force
+          $dll = Get-ChildItem build\lhm -Recurse -Filter LibreHardwareMonitorLib.dll | Select-Object -First 1
+          if (-not $dll) {
+            throw "LibreHardwareMonitorLib.dll was not found in downloaded archive."
+          }
+          "LHM_DIR=$($dll.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Get Flutter deps
+        run: flutter pub get
+        working-directory: flutter_desktop
+
+      - name: Build Windows release artifacts
+        shell: pwsh
+        run: .\packaging\windows\build-release.ps1 -LibreHardwareMonitorDir "$env:LHM_DIR"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            packaging/out/*.zip
+            packaging/out/*.exe
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs:
+      - linux-arch
+      - windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
       - name: Create GitHub Release and upload assets
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          shopt -s globstar nullglob
+          shopt -s nullglob
 
-          files=(
-            packaging/out/**/*.deb
-            packaging/appimage/*.AppImage
-            packaging/arch/*.tar.gz
-            packaging/arch/*.pkg.*
-          )
+          files=(release-assets/*)
 
           if [ ${#files[@]} -eq 0 ]; then
             echo "ERROR: No release files found"
@@ -185,23 +204,12 @@ jobs:
 
           ## Downloads
 
-          Choose the package for your distro from the release assets below.
-
           | System | Recommended download |
           | --- | --- |
-          | Ubuntu / Debian | `.deb` |
           | Arch Linux | `.pkg.tar.zst` |
-          | SteamOS | `.AppImage` |
-          | Bazzite | `.AppImage` |
-          | Other Linux | `.AppImage` |
+          | Windows | `DeepCoolDigitalDartSetup-*-windows-x64.exe` |
 
           ## Install
-
-          Ubuntu / Debian:
-
-          ```bash
-          sudo apt install ./deepcool-desktop_*.deb
-          ```
 
           Arch Linux:
 
@@ -209,46 +217,22 @@ jobs:
           sudo pacman -U deepcool-desktop-*.pkg.tar.zst
           ```
 
-          SteamOS / Bazzite / Other Linux:
+          Windows:
 
-          ```bash
-          chmod +x Deepcool-Digital-Linux*.AppImage
-          ./Deepcool-Digital-Linux*.AppImage
-          ```
-
-          On SteamOS, run it from Desktop Mode.
-
-          ## After Installing
-
-          1. Open **Deepcool Digital Linux**.
-          2. Pick **CPU**, **GPU**, or **PSU** from the left side.
-          3. Click **Save ... view to display**.
-          4. Turn on **Keep display running** at the top of the app.
-          5. Approve the admin prompt if it appears.
-          6. If the app installs device access, unplug and reconnect the display once.
+          Download and run `DeepCoolDigitalDartSetup-*-windows-x64.exe`.
 
           ## Notes
 
-          - PSU readings require Linux to expose a real PSU sensor through `hwmon`. If no PSU sensor is available, PSU mode can fall back to an estimated **CPU + GPU power** value when those sensors are readable.
-          - HIDAPI must be installed on the system. If the app says HIDAPI is missing, install your distro's `hidapi` package and reopen the app.
-          - If the display flickers between modes, an old DeepCool service may still be writing to the display. Turn **Keep display running** off and on once, or stop the old service manually.
-
-          ## Support
-
-          If this app helps with your DeepCool Digital display, you can support or follow development here:
-
-          - Ko-fi: <https://ko-fi.com/rahngamingstudio>
-          - GitHub: <https://github.com/RahnRazamai/deepcool_digital_dart>
-          - Issues: <https://github.com/RahnRazamai/deepcool_digital_dart/issues>
+          - Linux packages are currently Arch-only.
+          - Windows packages include the headless sensor backend, LibreHardwareMonitorLib dependencies, HIDAPI, and the Flutter GUI.
+          - PSU readings require the operating system or hardware backend to expose real PSU telemetry. If no PSU sensor is available, PSU mode can fall back to estimated CPU + GPU power when those sensors are readable.
           RELEASE_NOTES
           } > "$release_notes_file"
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release already exists. Uploading assets with --clobber..."
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
             gh release edit "$GITHUB_REF_NAME" --notes-file "$release_notes_file"
           else
-            echo "Creating release $GITHUB_REF_NAME..."
             gh release create "$GITHUB_REF_NAME" "${files[@]}" \
               --title "Release $GITHUB_REF_NAME" \
               --notes-file "$release_notes_file"

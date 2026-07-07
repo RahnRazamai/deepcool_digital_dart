@@ -5,7 +5,9 @@ import 'package:deepcool_digital_dart/deepcool_digital_dart.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:tray_manager/tray_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:window_manager/window_manager.dart';
 
 final ValueNotifier<DisplayMode> _savedDisplayModeNotifier =
     ValueNotifier<DisplayMode>(DisplayMode.cpuFrequency);
@@ -24,8 +26,124 @@ KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="34d3", ATTRS{idProduct
 SUBSYSTEM=="powercap", KERNEL=="*-rapl:*", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj", RUN+="/bin/chmod a+r /sys/class/powercap/%k/max_energy_range_uj"
 ''';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows) {
+    await WindowsTrayController.instance.initialize();
+    WindowsSensors.instance.start();
+  }
   runApp(const MyApp());
+}
+
+class WindowsTrayController with WindowListener, TrayListener {
+  WindowsTrayController._();
+
+  static final WindowsTrayController instance = WindowsTrayController._();
+
+  bool _initialized = false;
+  bool _quitting = false;
+
+  Future<void> initialize() async {
+    if (_initialized || !Platform.isWindows) {
+      return;
+    }
+
+    await windowManager.ensureInitialized();
+    windowManager.addListener(this);
+    trayManager.addListener(this);
+    await windowManager.setPreventClose(true);
+    await windowManager.setTitle('DeepCool Digital Dart');
+    await _setupTray();
+    _initialized = true;
+  }
+
+  Future<void> _setupTray() async {
+    final iconPath = _trayIconPath();
+    if (iconPath != null) {
+      await trayManager.setIcon(iconPath);
+    }
+    await trayManager.setToolTip('DeepCool Digital Dart');
+    await trayManager.setContextMenu(
+      Menu(
+        items: [
+          MenuItem(key: 'show', label: 'Show DeepCool Digital Dart'),
+          MenuItem.separator(),
+          MenuItem(key: 'quit', label: 'Quit'),
+        ],
+      ),
+    );
+  }
+
+  String? _trayIconPath() {
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
+    final currentDir = Directory.current.path;
+    final candidates = [
+      '$executableDir\\app_icon.ico',
+      '$executableDir\\resources\\app_icon.ico',
+      '$currentDir\\app_icon.ico',
+      '$currentDir\\windows\\runner\\resources\\app_icon.ico',
+      '$currentDir\\..\\flutter_desktop\\windows\\runner\\resources\\app_icon.ico',
+    ];
+
+    for (final path in candidates) {
+      if (File(path).existsSync()) {
+        return path;
+      }
+    }
+    return null;
+  }
+
+  Future<void> showWindow() async {
+    await windowManager.show();
+    await windowManager.restore();
+    await windowManager.focus();
+  }
+
+  Future<void> hideWindow() async {
+    await windowManager.hide();
+  }
+
+  Future<void> quit() async {
+    _quitting = true;
+    await trayManager.destroy();
+    await DisplayUpdater.instance.dispose();
+    await windowManager.destroy();
+  }
+
+  @override
+  Future<void> onWindowClose() async {
+    if (_quitting) {
+      return;
+    }
+    await hideWindow();
+  }
+
+  @override
+  Future<void> onWindowMinimize() async {
+    await hideWindow();
+  }
+
+  @override
+  Future<void> onTrayIconMouseDown() async {
+    await showWindow();
+  }
+
+  @override
+  Future<void> onTrayIconRightMouseDown() async {
+    await trayManager.popUpContextMenu();
+  }
+
+  @override
+  Future<void> onTrayMenuItemClick(MenuItem menuItem) async {
+    switch (menuItem.key) {
+      case 'show':
+        await showWindow();
+        break;
+      case 'quit':
+        await quit();
+        break;
+    }
+  }
 }
 
 Future<String> sendStatusPacket({
@@ -220,8 +338,8 @@ Future<String> applyDisplayMode({
 }
 
 Future<String?> startSavedDisplayDaemon() async {
-  if (!Platform.isLinux) {
-    return 'Background display updates are only supported on Linux.';
+  if (!Platform.isLinux && !Platform.isWindows) {
+    return 'Background display updates are not supported on this OS.';
   }
 
   final cfg = await AppConfig.load();
@@ -261,11 +379,17 @@ Future<String?> ensureStableDaemonPath([String? preferredPath]) async {
   }
 
   final executableDir = File(Platform.resolvedExecutable).parent.path;
-  final candidates = [
-    '$executableDir/deepcool-digital-dart',
-    '/usr/bin/deepcool-digital-dart',
-    '${Directory.current.path}/build/deepcool-digital-dart',
-  ];
+  final candidates = Platform.isWindows
+      ? [
+          '$executableDir\\deepcool-digital-dart.exe',
+          '$executableDir\\deepcool_digital_dart.exe',
+          '${Directory.current.path}\\build\\deepcool-digital-dart.exe',
+        ]
+      : [
+          '$executableDir/deepcool-digital-dart',
+          '/usr/bin/deepcool-digital-dart',
+          '${Directory.current.path}/build/deepcool-digital-dart',
+        ];
 
   for (final path in candidates) {
     final file = File(path);
@@ -281,6 +405,19 @@ Future<String?> ensureStableDaemonPath([String? preferredPath]) async {
 }
 
 Future<String> _copyDaemonToUserData(File source) async {
+  if (Platform.isWindows) {
+    final appData = Platform.environment['APPDATA'];
+    final baseDir = appData != null && appData.isNotEmpty
+        ? appData
+        : Directory.current.path;
+    final target = File(
+      '$baseDir\\deepcool-desktop\\deepcool-digital-dart.exe',
+    );
+    await target.parent.create(recursive: true);
+    await source.copy(target.path);
+    return target.path;
+  }
+
   final dataHome = Platform.environment['XDG_DATA_HOME'];
   final home = Platform.environment['HOME'];
   final baseDir = dataHome != null && dataHome.isNotEmpty
@@ -460,6 +597,9 @@ class _MainShellState extends State<MainShell> {
     try {
       final cfg = await AppConfig.load();
       _savedDisplayModeNotifier.value = cfg.displayMode;
+      if (Platform.isWindows) {
+        return;
+      }
       if (cfg.autostartUser) {
         await startSavedDisplayDaemon();
         return;
@@ -704,8 +844,16 @@ String _systemdQuote(String value) {
 
 class UserAutostartService {
   static const serviceName = 'deepcool-digital-dart.service';
+  static const windowsLauncherName = 'deepcool-digital-dart.vbs';
+  static const _legacyWindowsLauncherName = 'deepcool-digital-dart.cmd';
 
   static Future<bool> isEnabled() async {
+    if (Platform.isWindows) {
+      final launcher = _windowsStartupLauncher();
+      final legacyLauncher = _legacyWindowsStartupLauncher();
+      return (launcher != null && launcher.existsSync()) ||
+          (legacyLauncher != null && legacyLauncher.existsSync());
+    }
     if (!Platform.isLinux) return false;
     try {
       final result = await Process.run('systemctl', [
@@ -723,9 +871,18 @@ class UserAutostartService {
     required bool enabled,
     required String daemonPath,
   }) async {
+    if (Platform.isWindows) {
+      if (enabled) {
+        await start(daemonPath: daemonPath, enableOnLogin: true);
+      } else {
+        await _disableWindows();
+      }
+      return;
+    }
+
     if (!Platform.isLinux) {
       if (enabled) {
-        throw UnsupportedError('User autostart is only supported on Linux.');
+        throw UnsupportedError('User autostart is not supported on this OS.');
       }
       return;
     }
@@ -741,6 +898,29 @@ class UserAutostartService {
     required String daemonPath,
     bool enableOnLogin = false,
   }) async {
+    if (Platform.isWindows) {
+      if (enableOnLogin) {
+        final launcher = _windowsStartupLauncher();
+        if (launcher == null) {
+          throw StateError(
+            'APPDATA is not set, so Startup autostart cannot be written.',
+          );
+        }
+        await launcher.parent.create(recursive: true);
+        await launcher.writeAsString(_windowsHiddenLauncherScript(daemonPath));
+        final legacyLauncher = _legacyWindowsStartupLauncher();
+        if (legacyLauncher != null && await legacyLauncher.exists()) {
+          await legacyLauncher.delete();
+        }
+      }
+      await stopRunning();
+      await _startWindowsDaemonHidden(daemonPath);
+      return;
+    }
+    if (!Platform.isLinux) {
+      throw UnsupportedError('User autostart is not supported on this OS.');
+    }
+
     final unit = _unitFile();
     if (unit == null) {
       throw StateError(
@@ -767,11 +947,20 @@ class UserAutostartService {
   }
 
   static Future<void> stopRunning() async {
+    if (Platform.isWindows) {
+      await Process.run('taskkill', ['/IM', 'deepcool-digital-dart.exe', '/F']);
+      return;
+    }
     if (!Platform.isLinux) return;
     await Process.run('systemctl', ['--user', 'stop', serviceName]);
   }
 
   static Future<void> _disable() async {
+    if (Platform.isWindows) {
+      await _disableWindows();
+      return;
+    }
+
     final unit = _unitFile();
     if (unit == null) return;
 
@@ -797,6 +986,49 @@ class UserAutostartService {
     if (home == null || home.isEmpty) return null;
     return File('$home/.config/systemd/user/$serviceName');
   }
+
+  static Future<void> _disableWindows() async {
+    await stopRunning();
+    final launcher = _windowsStartupLauncher();
+    if (launcher != null && await launcher.exists()) {
+      await launcher.delete();
+    }
+    final legacyLauncher = _legacyWindowsStartupLauncher();
+    if (legacyLauncher != null && await legacyLauncher.exists()) {
+      await legacyLauncher.delete();
+    }
+  }
+
+  static File? _windowsStartupLauncher() {
+    return _windowsStartupFile(windowsLauncherName);
+  }
+
+  static File? _legacyWindowsStartupLauncher() {
+    return _windowsStartupFile(_legacyWindowsLauncherName);
+  }
+
+  static File? _windowsStartupFile(String name) {
+    final appData = Platform.environment['APPDATA'];
+    if (appData == null || appData.isEmpty) return null;
+    return File(
+      '$appData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\$name',
+    );
+  }
+}
+
+Future<void> _startWindowsDaemonHidden(String daemonPath) async {
+  final tempDir = Directory.systemTemp;
+  final launcher = File('${tempDir.path}\\deepcool-digital-dart-start.vbs');
+  await launcher.writeAsString(_windowsHiddenLauncherScript(daemonPath));
+  await Process.start('wscript.exe', [
+    launcher.path,
+  ], mode: ProcessStartMode.detached);
+}
+
+String _windowsHiddenLauncherScript(String daemonPath) {
+  final escapedPath = daemonPath.replaceAll('"', '""');
+  return 'Set shell = CreateObject("WScript.Shell")\r\n'
+      'shell.Run Chr(34) & "$escapedPath" & Chr(34) & " --mode saved", 0, False\r\n';
 }
 
 String _processOutput(ProcessResult result) {
@@ -812,10 +1044,14 @@ String userFacingDeviceMessage(Object error) {
       return 'No supported DeepCool Digital display was found. Connect one of: ${supportedDeepCoolProductNames()}.';
     }
     if (error.message.contains('Could not load HIDAPI')) {
-      return 'HIDAPI is not installed. Install the hidapi package for your distro, then reopen the app.';
+      return Platform.isWindows
+          ? 'HIDAPI is not installed. Put hidapi.dll next to the app executable or somewhere in PATH, then reopen the app.'
+          : 'HIDAPI is not installed. Install the hidapi package for your distro, then reopen the app.';
     }
     if (error.message.contains('Failed to open HID device')) {
-      return 'Linux is blocking access to the DeepCool display. Turn on "Keep display running" at the top of the app, approve the prompt, then unplug and reconnect the display.';
+      return Platform.isWindows
+          ? 'Could not open the DeepCool display. Close other DeepCool display apps and try again.'
+          : 'Linux is blocking access to the DeepCool display. Turn on "Keep display running" at the top of the app, approve the prompt, then unplug and reconnect the display.';
     }
   }
   return error.toString();
@@ -1156,22 +1392,11 @@ class _MonitorPageState extends State<MonitorPage> {
   }
 
   Map<String, int> _readMemInfo() {
-    try {
-      final lines = File('/proc/meminfo').readAsLinesSync();
-      final values = <String, int>{};
-      for (final line in lines) {
-        final parts = line.split(':');
-        if (parts.length != 2) continue;
-        final key = parts[0].trim();
-        final value = int.tryParse(parts[1].trim().split(' ').first);
-        if (value != null) {
-          values[key] = value;
-        }
-      }
-      return values;
-    } on FileSystemException {
+    final stats = readMemoryStats();
+    if (stats == null) {
       return const {};
     }
+    return {'MemTotal': stats.totalKb, 'MemAvailable': stats.availableKb};
   }
 
   Future<void> _sendCpuStatus() async {
@@ -1227,7 +1452,14 @@ class _MonitorPageState extends State<MonitorPage> {
     }
     if (current != null) _prevSample = current;
 
-    if (_monitor.hasRapl) {
+    if (Platform.isWindows) {
+      setState(() {
+        _cpuPowerWatts = _monitor.powerWattsSince(
+          0,
+          const Duration(seconds: 1),
+        );
+      });
+    } else if (_monitor.hasRapl) {
       final now = DateTime.now();
       final currentEnergy = _monitor.readEnergyMicrojoules();
       final elapsed = now.difference(_prevEnergyReadTime ?? now);

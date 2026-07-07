@@ -1,5 +1,9 @@
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
+
+import '../native_memory.dart';
+import 'windows_sensors.dart';
 
 final class CpuSample {
   const CpuSample({required this.total, required this.idle});
@@ -35,6 +39,12 @@ final class CpuMonitor {
   bool get hasPowerSensor => _raplEnergyPath != null;
 
   String? get powerWarning {
+    if (Platform.isWindows) {
+      return WindowsSensors.instance.snapshot.cpuPower == null
+          ? 'CPU package power needs LibreHardwareMonitor/OpenHardwareMonitor running.'
+          : null;
+    }
+
     final path = _raplEnergyPath;
     if (path == null) {
       return 'No CPU power sensor was found.';
@@ -49,6 +59,13 @@ final class CpuMonitor {
   }
 
   int temperature({required bool fahrenheit}) {
+    if (Platform.isWindows) {
+      final celsius = WindowsSensors.instance.snapshot.cpuTemperature;
+      if (celsius == null) return 0;
+      final value = fahrenheit ? (celsius * 9 / 5) + 32 : celsius;
+      return _clampByte(value.round());
+    }
+
     final path = _temperaturePath;
     if (path == null) {
       return 0;
@@ -73,6 +90,12 @@ final class CpuMonitor {
   }
 
   int powerWattsSince(int initialEnergy, Duration elapsed) {
+    if (Platform.isWindows) {
+      return _clampWord(
+        WindowsSensors.instance.snapshot.cpuPower?.round() ?? 0,
+      );
+    }
+
     if (!hasRapl || initialEnergy <= 0 || elapsed.inMilliseconds <= 0) {
       return 0;
     }
@@ -90,6 +113,10 @@ final class CpuMonitor {
   }
 
   CpuSample? readUsageSample() {
+    if (Platform.isWindows) {
+      return _windowsUsageSample();
+    }
+
     final stat = _readTrimmed('/proc/stat');
     if (stat == null) {
       return null;
@@ -135,6 +162,14 @@ final class CpuMonitor {
   }
 
   int frequencyMhz() {
+    if (Platform.isWindows) {
+      return _clampWord(
+        WindowsSensors.instance.snapshot.cpuClock?.round() ??
+            _windowsProcessorMhz ??
+            0,
+      );
+    }
+
     final cpuinfo = _readTrimmed('/proc/cpuinfo');
     var highest = 0.0;
 
@@ -158,6 +193,10 @@ final class CpuMonitor {
   }
 
   static String? cpuName() {
+    if (Platform.isWindows) {
+      return _windowsProcessorName;
+    }
+
     final cpuinfo = _readTrimmed('/proc/cpuinfo');
     if (cpuinfo == null) {
       return null;
@@ -171,6 +210,19 @@ final class CpuMonitor {
   }
 
   static CpuVendor cpuVendor() {
+    if (Platform.isWindows) {
+      final value =
+          '${_windowsProcessorName ?? ''} ${Platform.environment['PROCESSOR_IDENTIFIER'] ?? ''}'
+              .toLowerCase();
+      if (value.contains('amd') || value.contains('advanced micro devices')) {
+        return CpuVendor.amd;
+      }
+      if (value.contains('intel')) {
+        return CpuVendor.intel;
+      }
+      return CpuVendor.unknown;
+    }
+
     final cpuinfo = _readTrimmed('/proc/cpuinfo');
     if (cpuinfo == null) {
       return CpuVendor.unknown;
@@ -360,3 +412,119 @@ int? _readInt(String path) {
 
 int _clampByte(int value) => value.clamp(0, 255).toInt();
 int _clampWord(int value) => value.clamp(0, 65535).toInt();
+
+final class _FileTime extends Struct {
+  @Uint32()
+  external int lowDateTime;
+
+  @Uint32()
+  external int highDateTime;
+}
+
+typedef _GetSystemTimesNative =
+    Int32 Function(
+      Pointer<_FileTime> idleTime,
+      Pointer<_FileTime> kernelTime,
+      Pointer<_FileTime> userTime,
+    );
+typedef _GetSystemTimesDart =
+    int Function(
+      Pointer<_FileTime> idleTime,
+      Pointer<_FileTime> kernelTime,
+      Pointer<_FileTime> userTime,
+    );
+
+final _GetSystemTimesDart? _getSystemTimes = Platform.isWindows
+    ? DynamicLibrary.open(
+        'kernel32.dll',
+      ).lookupFunction<_GetSystemTimesNative, _GetSystemTimesDart>(
+        'GetSystemTimes',
+      )
+    : null;
+
+CpuSample? _windowsUsageSample() {
+  final getSystemTimes = _getSystemTimes;
+  if (getSystemTimes == null) {
+    return null;
+  }
+
+  final idle = NativeMemory.allocateBytes(
+    sizeOf<_FileTime>(),
+  ).cast<_FileTime>();
+  final kernel = NativeMemory.allocateBytes(
+    sizeOf<_FileTime>(),
+  ).cast<_FileTime>();
+  final user = NativeMemory.allocateBytes(
+    sizeOf<_FileTime>(),
+  ).cast<_FileTime>();
+  try {
+    if (getSystemTimes(idle, kernel, user) == 0) {
+      return null;
+    }
+
+    final idleTicks = _fileTimeTicks(idle.ref);
+    final kernelTicks = _fileTimeTicks(kernel.ref);
+    final userTicks = _fileTimeTicks(user.ref);
+    return CpuSample(total: kernelTicks + userTicks, idle: idleTicks);
+  } finally {
+    NativeMemory.free(idle.cast<Void>());
+    NativeMemory.free(kernel.cast<Void>());
+    NativeMemory.free(user.cast<Void>());
+  }
+}
+
+int _fileTimeTicks(_FileTime time) {
+  return (time.highDateTime << 32) | time.lowDateTime;
+}
+
+final String? _windowsProcessorName = Platform.isWindows
+    ? _readWindowsProcessorRegistryString('ProcessorNameString')
+    : null;
+
+final int? _windowsProcessorMhz = Platform.isWindows
+    ? _readWindowsProcessorRegistryDword('~MHz')
+    : null;
+
+String? _readWindowsProcessorRegistryString(String valueName) {
+  final value = _readWindowsProcessorRegistryValue(valueName);
+  return value == null || value.isEmpty ? null : value;
+}
+
+int? _readWindowsProcessorRegistryDword(String valueName) {
+  final value = _readWindowsProcessorRegistryValue(valueName);
+  if (value == null || value.isEmpty) {
+    return null;
+  }
+  if (value.startsWith('0x')) {
+    return int.tryParse(value.substring(2), radix: 16);
+  }
+  return int.tryParse(value);
+}
+
+String? _readWindowsProcessorRegistryValue(String valueName) {
+  try {
+    final result = Process.runSync('reg', [
+      'query',
+      r'HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0',
+      '/v',
+      valueName,
+    ]);
+    if (result.exitCode != 0) {
+      return null;
+    }
+
+    for (final line in result.stdout.toString().split('\n')) {
+      final trimmed = line.trim();
+      if (!trimmed.startsWith(valueName)) {
+        continue;
+      }
+      final parts = trimmed.split(RegExp(r'\s{2,}'));
+      if (parts.length >= 3) {
+        return parts.sublist(2).join(' ').trim();
+      }
+    }
+  } on ProcessException {
+    return null;
+  }
+  return null;
+}
