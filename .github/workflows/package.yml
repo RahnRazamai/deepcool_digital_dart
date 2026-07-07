@@ -24,7 +24,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libhidapi-dev libgtk-3-dev xz-utils
+          sudo apt-get install -y libayatana-appindicator3-dev libhidapi-dev libgtk-3-dev xz-utils
 
       - name: Get Flutter deps
         run: flutter pub get
