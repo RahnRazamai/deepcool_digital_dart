@@ -109,7 +109,7 @@ jobs:
     steps:
       - name: Install Fedora build dependencies
         run: |
-          dnf install -y git curl-minimal unzip xz tar findutils which \
+          dnf install -y git curl-minimal jq unzip xz tar findutils which \
             clang cmake ninja-build gcc-c++ pkgconf-pkg-config \
             gtk3-devel hidapi-devel libayatana-appindicator-gtk3-devel \
             rpm-build redhat-rpm-config desktop-file-utils patchelf
