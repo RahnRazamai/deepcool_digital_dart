@@ -122,6 +122,12 @@ jobs:
         with:
           flutter-version: '3.44.2'
 
+      - name: Trust Flutter SDK in Fedora container
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$FLUTTER_ROOT"
+          flutter --version
+
       - name: Build Fedora RPM
         shell: bash
         run: |
