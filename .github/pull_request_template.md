@@ -34,5 +34,5 @@ Commands run:
 
 ## Packaging and release notes
 
-- Package formats affected: Arch / Windows / none
+- Package formats affected: Arch / Fedora RPM / Windows / none
 - User-facing release note:

@@ -44,6 +44,7 @@ Choose the package for your system:
 | System | Recommended download |
 | --- | --- |
 | Arch Linux | `.pkg.tar.zst` |
+| Fedora (x86_64) | `.x86_64.rpm` |
 | Windows | `.exe` installer or `.zip` |
 
 ## Install
@@ -53,6 +54,15 @@ Choose the package for your system:
 ```bash
 sudo pacman -U deepcool-desktop-*.pkg.tar.zst
 ```
+
+### Fedora
+
+```bash
+sudo dnf install ./deepcool-desktop-*.x86_64.rpm
+```
+
+The package includes the daemon and device access rule. Open the app and enable
+**Keep display running** to keep the display updating in the background.
 
 ### Windows
 
@@ -177,6 +187,8 @@ cd ..
 dart compile exe bin/deepcool_digital_dart.dart -o build/deepcool-digital-dart
 ```
 
+To build a Fedora RPM, see [packaging/rpm/README.md](packaging/rpm/README.md).
+
 On Windows:
 
 ```powershell
@@ -210,7 +222,7 @@ flutter test
 
 - `flutter_desktop/` - Flutter desktop app
 - `lib/` and `bin/` - shared Dart library and CLI daemon
-- `packaging/` - Arch Linux and Windows packaging
+- `packaging/` - Arch Linux, Fedora RPM, and Windows packaging
 
 ## License
 

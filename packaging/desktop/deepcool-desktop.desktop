@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=Deepcool Digital Linux
+Name=DeepCool Digital Dart
 Exec=deepcool-desktop
 Type=Application
 Categories=Utility;
-Icon=com.rgs.deepcool_linux
+Icon=deepcool-desktop
 StartupWMClass=com.rgs.deepcool_linux

@@ -102,6 +102,57 @@ jobs:
             packaging/arch/*.tar.gz
             packaging/arch/*.pkg.*
 
+  linux-rpm:
+    name: Fedora RPM package
+    runs-on: ubuntu-latest
+    container: fedora:43
+    steps:
+      - name: Install Fedora build dependencies
+        run: |
+          dnf install -y git curl-minimal unzip xz tar findutils which \
+            clang cmake ninja-build gcc-c++ pkgconf-pkg-config \
+            gtk3-devel hidapi-devel libayatana-appindicator-gtk3-devel \
+            rpm-build redhat-rpm-config desktop-file-utils patchelf
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+
+      - name: Build Fedora RPM
+        shell: bash
+        run: |
+          args=()
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            args+=(--version "$GITHUB_REF_NAME")
+          fi
+          bash packaging/rpm/build-release.sh "${args[@]}"
+
+      - name: Smoke-test Fedora RPM
+        shell: bash
+        run: |
+          dnf install -y ./packaging/out/*.rpm
+          deepcool-digital-dart --help
+          appdir="$(rpm --eval '%{_libdir}')/deepcool-desktop"
+          for binary in "$appdir/deepcool_desktop_app" "$appdir"/lib/*_plugin.so; do
+            dependencies="$(LD_LIBRARY_PATH="$appdir/lib" ldd "$binary")"
+            if [[ "$dependencies" == *"not found"* ]]; then
+              printf '%s\n' "$dependencies"
+              echo "ERROR: Unresolved runtime libraries in $binary" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload Fedora artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-rpm-package
+          path: packaging/out/*.rpm
+          if-no-files-found: error
+
   windows:
     name: Windows package
     runs-on: windows-latest
@@ -166,6 +217,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs:
       - linux-arch
+      - linux-rpm
       - windows
     runs-on: ubuntu-latest
     steps:
@@ -207,6 +259,7 @@ jobs:
           | System | Recommended download |
           | --- | --- |
           | Arch Linux | `.pkg.tar.zst` |
+          | Fedora (x86_64) | `.x86_64.rpm` |
           | Windows | `DeepCoolDigitalDartSetup-*-windows-x64.exe` |
 
           ## Install
@@ -217,13 +270,19 @@ jobs:
           sudo pacman -U deepcool-desktop-*.pkg.tar.zst
           ```
 
+          Fedora:
+
+          ```bash
+          sudo dnf install ./deepcool-desktop-*.x86_64.rpm
+          ```
+
           Windows:
 
           Download and run `DeepCoolDigitalDartSetup-*-windows-x64.exe`.
 
           ## Notes
 
-          - Linux packages are currently Arch-only.
+          - Linux packages include the GUI, CLI daemon, and device access rule. Enable **Keep display running** in the app for background updates.
           - Windows packages include the headless sensor backend, LibreHardwareMonitorLib dependencies, HIDAPI, and the Flutter GUI.
           - PSU readings require the operating system or hardware backend to expose real PSU telemetry. If no PSU sensor is available, PSU mode can fall back to estimated CPU + GPU power when those sensors are readable.
           RELEASE_NOTES
