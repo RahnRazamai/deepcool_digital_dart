@@ -20,7 +20,6 @@ BuildRequires:  desktop-file-utils
 BuildRequires:  patchelf
 Requires:       gtk3
 Requires:       hidapi
-Requires:       libayatana-appindicator-gtk3
 Requires:       systemd
 Requires:       polkit
 Requires(post): systemd-udev

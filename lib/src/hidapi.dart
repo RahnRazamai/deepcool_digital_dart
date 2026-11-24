@@ -134,6 +134,7 @@ final class HidApi {
   late final _HidCloseDart _close;
 
   static DynamicLibrary _openLibrary() {
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
     final names = Platform.isWindows
         ? const [
             'hidapi.dll',
@@ -141,7 +142,10 @@ final class HidApi {
             'hidapi-libusb.dll',
             'libhidapi.dll',
           ]
-        : const [
+        : [
+            if (Platform.isLinux &&
+                File('$executableDir/lib/libhidapi-hidraw.so.0').existsSync())
+              '$executableDir/lib/libhidapi-hidraw.so.0',
             'libhidapi-hidraw.so.0',
             'libhidapi-hidraw.so',
             'libhidapi-libusb.so.0',

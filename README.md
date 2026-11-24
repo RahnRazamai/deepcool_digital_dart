@@ -45,6 +45,7 @@ Choose the package for your system:
 | --- | --- |
 | Arch Linux | `.pkg.tar.zst` |
 | Fedora (x86_64) | `.x86_64.rpm` |
+| Linux AppImage (x86_64) | `.AppImage` |
 | Windows | `.exe` installer or `.zip` |
 
 ## Install
@@ -63,6 +64,20 @@ sudo dnf install ./deepcool-desktop-*.x86_64.rpm
 
 The package includes the daemon and device access rule. Open the app and enable
 **Keep display running** to keep the display updating in the background.
+
+### Linux AppImage
+
+In the directory containing the downloaded AppImage, make it executable and run it:
+
+```bash
+chmod +x deepcool-desktop-*.AppImage
+./deepcool-desktop-*.AppImage
+```
+
+If FUSE is unavailable, run `./deepcool-desktop-*.AppImage --appimage-extract-and-run`.
+The AppImage uses your system's GTK 3 and X11 libraries. For background updates, enable
+**Keep display running** in a systemd user session and approve the device access
+prompt if it appears.
 
 ### Windows
 

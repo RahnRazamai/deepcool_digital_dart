@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+APPDIR=$(dirname -- "$(readlink -f -- "$0")")
+export APPDIR
+export LD_LIBRARY_PATH="$APPDIR/usr/bin/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$APPDIR/usr/bin/deepcool_desktop_app" "$@"

@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FLUTTER_VERSION: '3.50.1'
+
 jobs:
   linux-arch:
     name: Linux Arch package
@@ -19,12 +22,12 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.2'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libayatana-appindicator3-dev libhidapi-dev libgtk-3-dev xz-utils
+          sudo apt-get install -y libhidapi-dev libgtk-3-dev libx11-dev libxi-dev xz-utils
 
       - name: Get Flutter deps
         run: flutter pub get
@@ -111,7 +114,7 @@ jobs:
         run: |
           dnf install -y git curl-minimal jq unzip xz tar findutils which \
             clang cmake ninja-build gcc-c++ pkgconf-pkg-config \
-            gtk3-devel hidapi-devel libayatana-appindicator-gtk3-devel \
+            gtk3-devel hidapi-devel libX11-devel libXi-devel \
             rpm-build redhat-rpm-config desktop-file-utils patchelf
 
       - name: Checkout repository
@@ -120,7 +123,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.2'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: Trust Flutter SDK in Fedora container
         shell: bash
@@ -143,7 +146,7 @@ jobs:
           dnf install -y ./packaging/out/*.rpm
           deepcool-digital-dart --help
           appdir="$(rpm --eval '%{_libdir}')/deepcool-desktop"
-          for binary in "$appdir/deepcool_desktop_app" "$appdir"/lib/*_plugin.so; do
+          for binary in "$appdir/deepcool_desktop_app" "$appdir"/lib/libcnativeapi.so "$appdir"/lib/*_plugin.so; do
             dependencies="$(LD_LIBRARY_PATH="$appdir/lib" ldd "$binary")"
             if [[ "$dependencies" == *"not found"* ]]; then
               printf '%s\n' "$dependencies"
@@ -159,6 +162,67 @@ jobs:
           path: packaging/out/*.rpm
           if-no-files-found: error
 
+  linux-appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Install AppImage build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev \
+            libx11-dev libxi-dev libhidapi-dev desktop-file-utils curl file xvfb xauth
+
+      - name: Build Linux AppImage
+        run: |
+          args=()
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            args+=(--version "$GITHUB_REF_NAME")
+          fi
+          bash packaging/appimage/build-release.sh "${args[@]}"
+
+      - name: Smoke-test AppImage
+        run: |
+          set -euo pipefail
+          image=("$PWD"/packaging/out/*.AppImage)
+          test "${#image[@]}" -eq 1
+          workdir="$(mktemp -d)"
+          trap 'rm -rf -- "$workdir"' EXIT
+          cd "$workdir"
+          "${image[0]}" --appimage-extract >/dev/null
+          bindir="$workdir/squashfs-root/usr/bin"
+          for binary in "$bindir/deepcool_desktop_app" "$bindir"/lib/libcnativeapi.so "$bindir"/lib/*_plugin.so; do
+            dependencies="$(LD_LIBRARY_PATH="$bindir/lib" ldd "$binary")"
+            if [[ "$dependencies" == *"not found"* ]]; then
+              printf '%s\n' "$dependencies"
+              echo "ERROR: Unresolved runtime libraries in $binary" >&2
+              exit 1
+            fi
+          done
+          mkdir -p daemon/lib
+          cp "$bindir/deepcool-digital-dart" daemon/
+          cp "$bindir/lib/libhidapi-hidraw.so.0" daemon/lib/
+          mv squashfs-root extracted-away
+          LD_DEBUG=libs LD_DEBUG_OUTPUT="$workdir/loader" ./daemon/deepcool-digital-dart --list
+          grep -Fq "calling init: $workdir/daemon/lib/libhidapi-hidraw.so.0" "$workdir"/loader.*
+          status=0
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a timeout 15s "${image[0]}" || status=$?
+          test "$status" -eq 124
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: packaging/out/*.AppImage
+          if-no-files-found: error
+
   windows:
     name: Windows package
     runs-on: windows-latest
@@ -169,7 +233,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.2'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -224,6 +288,7 @@ jobs:
     needs:
       - linux-arch
       - linux-rpm
+      - linux-appimage
       - windows
     runs-on: ubuntu-latest
     steps:
@@ -266,6 +331,7 @@ jobs:
           | --- | --- |
           | Arch Linux | `.pkg.tar.zst` |
           | Fedora (x86_64) | `.x86_64.rpm` |
+          | Linux AppImage (x86_64) | `.AppImage` |
           | Windows | `DeepCoolDigitalDartSetup-*-windows-x64.exe` |
 
           ## Install
@@ -282,13 +348,22 @@ jobs:
           sudo dnf install ./deepcool-desktop-*.x86_64.rpm
           ```
 
+          Linux AppImage:
+
+          ```bash
+          chmod +x deepcool-desktop-*.AppImage
+          ./deepcool-desktop-*.AppImage
+          ```
+
+          Use `--appimage-extract-and-run` if FUSE is unavailable. Enable **Keep display running** and approve the device access prompt to set up background updates.
+
           Windows:
 
           Download and run `DeepCoolDigitalDartSetup-*-windows-x64.exe`.
 
           ## Notes
 
-          - Linux packages include the GUI, CLI daemon, and device access rule. Enable **Keep display running** in the app for background updates.
+          - Linux packages include the GUI, CLI daemon, and device access rule. The AppImage uses the host's GTK 3 and X11 libraries. Background updates use a systemd user session.
           - Windows packages include the headless sensor backend, LibreHardwareMonitorLib dependencies, HIDAPI, and the Flutter GUI.
           - PSU readings require the operating system or hardware backend to expose real PSU telemetry. If no PSU sensor is available, PSU mode can fall back to estimated CPU + GPU power when those sensors are readable.
           RELEASE_NOTES

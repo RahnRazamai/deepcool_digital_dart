@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:deepcool_digital_dart/deepcool_digital_dart.dart';
-import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:tray_manager/tray_manager.dart';
+import 'package:flutter/gestures.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -26,52 +26,85 @@ KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="34d3", ATTRS{idProduct
 SUBSYSTEM=="powercap", KERNEL=="*-rapl:*", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj", RUN+="/bin/chmod a+r /sys/class/powercap/%k/max_energy_range_uj"
 ''';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows) {
-    await WindowsTrayController.instance.initialize();
+    WindowsTrayController.instance.initialize();
     WindowsSensors.instance.start();
   }
   runApp(const MyApp());
 }
 
-class WindowsTrayController with WindowListener, TrayListener {
+class WindowsTrayController {
   WindowsTrayController._();
 
   static final WindowsTrayController instance = WindowsTrayController._();
 
   bool _initialized = false;
   bool _quitting = false;
+  late final Window _window;
+  late final tray.TrayIcon _trayIcon;
 
-  Future<void> initialize() async {
+  void initialize() {
     if (_initialized || !Platform.isWindows) {
       return;
     }
 
-    await windowManager.ensureInitialized();
-    windowManager.addListener(this);
-    trayManager.addListener(this);
-    await windowManager.setPreventClose(true);
-    await windowManager.setTitle('DeepCool Digital Dart');
-    await _setupTray();
-    _initialized = true;
-  }
-
-  Future<void> _setupTray() async {
+    final window = WindowManager.instance.getCurrent();
     final iconPath = _trayIconPath();
-    if (iconPath != null) {
-      await trayManager.setIcon(iconPath);
-    }
-    await trayManager.setToolTip('DeepCool Digital Dart');
-    await trayManager.setContextMenu(
-      Menu(
-        items: [
-          MenuItem(key: 'show', label: 'Show DeepCool Digital Dart'),
-          MenuItem.separator(),
-          MenuItem(key: 'quit', label: 'Quit'),
-        ],
-      ),
+    if (window == null || iconPath == null) return;
+
+    final icon = tray.Image.fromFile(iconPath);
+    final menu = tray.Menu.create();
+    final showItem = tray.MenuItem.createWithLabelAndType(
+      'Show DeepCool Digital Dart',
+      tray.MenuItemType.normal,
     );
+    final quitItem = tray.MenuItem.createWithLabelAndType(
+      'Quit',
+      tray.MenuItemType.normal,
+    );
+    if (icon == null || menu == null || showItem == null || quitItem == null) {
+      return;
+    }
+
+    final trayIcon = tray.TrayIcon.create();
+    if (trayIcon == null) return;
+
+    showItem.addListener((event) {
+      if (event is tray.MenuItemClickedEvent) showWindow();
+    });
+    quitItem.addListener((event) async {
+      if (event is tray.MenuItemClickedEvent) await quit();
+    });
+    menu.addItem(showItem);
+    menu.addSeparator();
+    menu.addItem(quitItem);
+    trayIcon.icon = icon;
+    trayIcon.setTooltip('DeepCool Digital Dart');
+    trayIcon.setContextMenu(menu);
+    trayIcon.setContextMenuTrigger(tray.ContextMenuTrigger.rightClicked);
+    trayIcon.addListener((event) {
+      if (event is tray.TrayIconClickedEvent) showWindow();
+    });
+    if (!trayIcon.setVisible(true)) {
+      trayIcon.dispose();
+      return;
+    }
+    _window = window;
+    _trayIcon = trayIcon;
+
+    window.title = 'DeepCool Digital Dart';
+    window.addListener((event) {
+      if (_quitting) return;
+      if (event is WindowCloseRequestedEvent) {
+        event.request.cancel();
+        window.hide();
+      } else if (event is WindowMinimizedEvent) {
+        window.hide();
+      }
+    });
+    _initialized = true;
   }
 
   String? _trayIconPath() {
@@ -93,56 +126,18 @@ class WindowsTrayController with WindowListener, TrayListener {
     return null;
   }
 
-  Future<void> showWindow() async {
-    await windowManager.show();
-    await windowManager.restore();
-    await windowManager.focus();
-  }
-
-  Future<void> hideWindow() async {
-    await windowManager.hide();
+  void showWindow() {
+    _window.show();
+    _window.restore();
+    _window.focus();
   }
 
   Future<void> quit() async {
+    if (_quitting) return;
     _quitting = true;
-    await trayManager.destroy();
+    _trayIcon.dispose();
     await DisplayUpdater.instance.dispose();
-    await windowManager.destroy();
-  }
-
-  @override
-  Future<void> onWindowClose() async {
-    if (_quitting) {
-      return;
-    }
-    await hideWindow();
-  }
-
-  @override
-  Future<void> onWindowMinimize() async {
-    await hideWindow();
-  }
-
-  @override
-  Future<void> onTrayIconMouseDown() async {
-    await showWindow();
-  }
-
-  @override
-  Future<void> onTrayIconRightMouseDown() async {
-    await trayManager.popUpContextMenu();
-  }
-
-  @override
-  Future<void> onTrayMenuItemClick(MenuItem menuItem) async {
-    switch (menuItem.key) {
-      case 'show':
-        await showWindow();
-        break;
-      case 'quit':
-        await quit();
-        break;
-    }
+    _window.close();
   }
 }
 
@@ -370,6 +365,17 @@ Future<String?> startSavedDisplayDaemon() async {
 }
 
 Future<String?> ensureStableDaemonPath([String? preferredPath]) async {
+  final executableDir = File(Platform.resolvedExecutable).parent.path;
+  final appDir = Platform.environment['APPDIR'];
+  if (Platform.isLinux &&
+      appDir != null &&
+      executableDir == '$appDir/usr/bin') {
+    return _copyDaemonToUserData(
+      File('$executableDir/deepcool-digital-dart'),
+      hidapi: File('$executableDir/lib/libhidapi-hidraw.so.0'),
+    );
+  }
+
   final preferred = preferredPath?.trim();
   if (preferred != null && preferred.isNotEmpty) {
     final preferredFile = File(preferred);
@@ -378,7 +384,6 @@ Future<String?> ensureStableDaemonPath([String? preferredPath]) async {
     }
   }
 
-  final executableDir = File(Platform.resolvedExecutable).parent.path;
   final candidates = Platform.isWindows
       ? [
           '$executableDir\\deepcool-digital-dart.exe',
@@ -404,7 +409,7 @@ Future<String?> ensureStableDaemonPath([String? preferredPath]) async {
   return null;
 }
 
-Future<String> _copyDaemonToUserData(File source) async {
+Future<String> _copyDaemonToUserData(File source, {File? hidapi}) async {
   if (Platform.isWindows) {
     final appData = Platform.environment['APPDATA'];
     final baseDir = appData != null && appData.isNotEmpty
@@ -425,10 +430,33 @@ Future<String> _copyDaemonToUserData(File source) async {
       : (home != null && home.isNotEmpty
             ? '$home/.local/share'
             : Directory.current.path);
-  final target = File('$baseDir/deepcool-desktop/deepcool-digital-dart');
+  final daemonDir = '$baseDir/deepcool-desktop';
+  final target = File(
+    '${hidapi == null ? daemonDir : '$daemonDir/appimage'}/deepcool-digital-dart',
+  );
   await target.parent.create(recursive: true);
-  await source.copy(target.path);
-  await Process.run('chmod', ['755', target.path]);
+  final staging = await target.parent.createTemp('.daemon-');
+  try {
+    final daemon = await source.copy('${staging.path}/deepcool-digital-dart');
+    final chmod = await Process.run('chmod', ['755', daemon.path]);
+    if (chmod.exitCode != 0) {
+      throw FileSystemException(
+        'Could not make daemon executable',
+        daemon.path,
+      );
+    }
+    if (hidapi != null) {
+      final libDir = Directory('${target.parent.path}/lib');
+      await libDir.create(recursive: true);
+      final library = await hidapi.copy(
+        '${staging.path}/libhidapi-hidraw.so.0',
+      );
+      await library.rename('${libDir.path}/libhidapi-hidraw.so.0');
+    }
+    await daemon.rename(target.path);
+  } finally {
+    await staging.delete(recursive: true);
+  }
   return target.path;
 }
 
@@ -517,8 +545,7 @@ class _SupportPromptDialogState extends State<SupportPromptDialog> {
                 style: theme.textTheme.bodyMedium,
                 children: [
                   const TextSpan(
-                    text:
-                        'If this app helps, you can support development or follow the project on ',
+                    text: 'If this app helps, you can support development or follow the project on ',
                   ),
                   TextSpan(
                     text: 'GitHub',
@@ -1249,8 +1276,7 @@ class _PersistentDisplayControlState extends State<PersistentDisplayControl> {
         if (daemonPath == null) {
           setState(() {
             _enabled = false;
-            _status =
-                'Background daemon is not installed. Install a package build or compile it from source.';
+            _status = 'Background daemon is not installed. Install a package build or compile it from source.';
           });
           return;
         }

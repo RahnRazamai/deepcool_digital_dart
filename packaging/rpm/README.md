@@ -8,7 +8,7 @@ Install the build dependencies:
 
 ```bash
 sudo dnf install clang cmake ninja-build gcc-c++ pkgconf-pkg-config \
-  gtk3-devel hidapi-devel libayatana-appindicator-gtk3-devel \
+  gtk3-devel hidapi-devel libX11-devel libXi-devel \
   rpm-build redhat-rpm-config desktop-file-utils patchelf
 ```
 
@@ -38,7 +38,7 @@ sudo dnf install ./packaging/out/deepcool-desktop-*.x86_64.rpm
 ```
 
 The package installs the full Flutter bundle, the CLI daemon, a desktop launcher,
-an icon, and the udev rule for device access. HIDAPI and GTK/AppIndicator are
+an icon, and the udev rule for device access. HIDAPI, GTK, and X11 libraries are
 system dependencies resolved by DNF. Unplug and reconnect the display if device
 access is still blocked after installation.
 
